@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+    <title>Vanilla ADE</title>
+    <link rel="stylesheet" href="vendor/xterm/xterm.css" />
+    <link rel="stylesheet" href="css/main.css" />
+</head>
+<body>
+    <div id="application">
+        <header id="menubar"></header>
+        <aside id="project-panel"></aside>
+        <div id="panel-splitter"></div>
+        <main id="content-area"></main>
+        <footer id="status-bar"></footer>
+    </div>
+    <script src="vendor/xterm/xterm.js"></script>
+    <script src="vendor/xterm/addon-fit.js"></script>
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>

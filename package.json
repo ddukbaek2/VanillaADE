@@ -1,0 +1,52 @@
+{
+    "name": "vanilla-ade",
+    "version": "0.1.0",
+    "description": "AI 기반 크로스플랫폼 애플리케이션 개발 환경 (ADE)",
+    "main": "src/main/main.js",
+    "scripts": {
+        "start": "electron .",
+        "start:vm": "cross-env-shell VANILLA_DISABLE_SANDBOX=1 electron .",
+        "build:win": "electron-builder --win portable"
+    },
+    "author": "",
+    "license": "MIT",
+    "build": {
+        "appId": "com.ddukbaek2.vanilla-ade",
+        "productName": "Vanilla ADE",
+        "directories": {
+            "output": "build"
+        },
+        "npmRebuild": false,
+        "files": [
+            "src/**/*",
+            "assets/**/*",
+            "theme.json",
+            "package.json"
+        ],
+        "asarUnpack": [
+            "**/node_modules/node-pty/**"
+        ],
+        "win": {
+            "target": "portable",
+            "icon": "assets/icon.ico"
+        },
+        "mac": {
+            "icon": "assets/icon.icns"
+        },
+        "portable": {
+            "artifactName": "Vanilla-ADE-${version}.${ext}"
+        }
+    },
+    "devDependencies": {
+        "@fontsource/jetbrains-mono": "^5.3.0",
+        "cross-env": "^10.1.0",
+        "electron": "^43.2.0",
+        "electron-builder": "^26.15.3",
+        "pretendard": "^1.3.9"
+    },
+    "dependencies": {
+        "@xterm/addon-fit": "^0.11.0",
+        "@xterm/xterm": "^6.0.0",
+        "node-pty": "^1.1.0"
+    }
+}
