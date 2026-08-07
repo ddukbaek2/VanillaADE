@@ -1,37 +1,44 @@
 //=================================================================================================
 // agentManager.js
-// 에이전트(= 터미널 세션)를 관리한다. 각 에이전트는 pty 프로세스 하나로 백그라운드에서 상주하며,
-// 여러 개를 동시에 띄울 수 있다. 입출력은 리스너를 통해 메인 프로세스로 전달된다.
+// 에이전트 세션(pty 프로세스)을 관리한다. 각 에이전트는 지정 폴더를 작업 디렉토리로 삼아
+// AI 코딩 에이전트 CLI 를 백그라운드에서 구동하며, 입출력은 리스너를 통해 메인 프로세스로 전달된다.
 //=================================================================================================
 
 const System = globalThis;
 const pty = require("node-pty");
-const nodeOs = require("node:os");
 
 const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
-const TERMINAL_NAME = "xterm-color";
+const TERMINAL_NAME = "xterm-256color";
 
-let nextAgentId = 1;
-const agents = new System.Map();
+//=================================================================================================
+// 에이전트 종류별 실행 명령. (현재는 Claude Code 만 지원)
+//=================================================================================================
+const AGENT_COMMANDS =
+{
+    "claude-code":
+    {
+        command: "claude",
+        windowsCommand: "claude.cmd",
+        args: []
+    }
+};
+
+const sessions = new System.Map();
 let dataListener = null;
 let exitListener = null;
 
 //=================================================================================================
-// 플랫폼 기본 셸 명령을 반환한다.
+// 에이전트 종류에 해당하는 실행 명령 정의를 반환한다. (모르는 종류면 null)
 //=================================================================================================
-function getDefaultShell()
+function getCommandDefinition(agentKind)
 {
-    if (process.platform === "win32")
+    const commandDefinition = AGENT_COMMANDS[agentKind];
+    if (commandDefinition === undefined)
     {
-        return "powershell.exe";
+        return null;
     }
-    const shellFromEnvironment = process.env.SHELL;
-    if (shellFromEnvironment !== undefined && shellFromEnvironment.length > 0)
-    {
-        return shellFromEnvironment;
-    }
-    return "bash";
+    return commandDefinition;
 }
 
 //=================================================================================================
@@ -51,38 +58,72 @@ function setExitListener(listener)
 }
 
 //=================================================================================================
-// 새 에이전트(터미널 세션)를 생성하고 요약 정보를 반환한다.
+// 에이전트 세션을 시작한다. 이미 실행 중이면 그대로 성공으로 반환한다.
 //=================================================================================================
-function createAgent(workingDirectory)
+function startAgent(agentId, workingDirectory, agentKind)
 {
-    const agentId = nextAgentId;
-    nextAgentId += 1;
-
-    const shellCommand = getDefaultShell();
-    let resolvedWorkingDirectory = workingDirectory;
-    if (resolvedWorkingDirectory === null || resolvedWorkingDirectory === undefined)
+    const existingSession = sessions.get(agentId);
+    if (existingSession !== undefined)
     {
-        resolvedWorkingDirectory = nodeOs.homedir();
+        const alreadyRunningResult =
+        {
+            ok: true,
+            running: true
+        };
+        return alreadyRunningResult;
     }
+
+    const commandDefinition = getCommandDefinition(agentKind);
+    if (commandDefinition === null)
+    {
+        const unknownKindResult =
+        {
+            ok: false,
+            reason: "unknown-kind"
+        };
+        return unknownKindResult;
+    }
+
+    let shellCommand = commandDefinition.command;
+    if (process.platform === "win32")
+    {
+        shellCommand = commandDefinition.windowsCommand;
+    }
+    const commandArguments = commandDefinition.args;
 
     const spawnOptions =
     {
         name: TERMINAL_NAME,
         cols: DEFAULT_COLUMNS,
         rows: DEFAULT_ROWS,
-        cwd: resolvedWorkingDirectory,
+        cwd: workingDirectory,
         env: process.env
     };
-    const ptyProcess = pty.spawn(shellCommand, [], spawnOptions);
 
-    const agent =
+    let ptyProcess = null;
+    try
+    {
+        ptyProcess = pty.spawn(shellCommand, commandArguments, spawnOptions);
+    }
+    catch (spawnError)
+    {
+        const spawnFailedResult =
+        {
+            ok: false,
+            reason: "spawn-failed",
+            message: spawnError.message
+        };
+        return spawnFailedResult;
+    }
+
+    const session =
     {
         id: agentId,
-        title: "Agent " + agentId,
-        cwd: resolvedWorkingDirectory,
+        directory: workingDirectory,
+        kind: agentKind,
         pty: ptyProcess
     };
-    agents.set(agentId, agent);
+    sessions.set(agentId, session);
 
     ptyProcess.onData(function (data)
     {
@@ -93,20 +134,19 @@ function createAgent(workingDirectory)
     });
     ptyProcess.onExit(function (exitInfo)
     {
-        agents.delete(agentId);
+        sessions.delete(agentId);
         if (exitListener !== null)
         {
             exitListener(agentId, exitInfo);
         }
     });
 
-    const agentInfo =
+    const successResult =
     {
-        id: agentId,
-        title: agent.title,
-        cwd: agent.cwd
+        ok: true,
+        running: true
     };
-    return agentInfo;
+    return successResult;
 }
 
 //=================================================================================================
@@ -114,12 +154,12 @@ function createAgent(workingDirectory)
 //=================================================================================================
 function writeToAgent(agentId, data)
 {
-    const agent = agents.get(agentId);
-    if (agent === undefined)
+    const session = sessions.get(agentId);
+    if (session === undefined)
     {
         return;
     }
-    const ptyProcess = agent.pty;
+    const ptyProcess = session.pty;
     ptyProcess.write(data);
 }
 
@@ -128,69 +168,79 @@ function writeToAgent(agentId, data)
 //=================================================================================================
 function resizeAgent(agentId, columns, rows)
 {
-    const agent = agents.get(agentId);
-    if (agent === undefined)
+    const session = sessions.get(agentId);
+    if (session === undefined)
     {
         return;
     }
-    const ptyProcess = agent.pty;
+    const ptyProcess = session.pty;
     ptyProcess.resize(columns, rows);
 }
 
 //=================================================================================================
-// 에이전트를 종료한다.
+// 에이전트 세션을 종료한다.
 //=================================================================================================
-function killAgent(agentId)
+function stopAgent(agentId)
 {
-    const agent = agents.get(agentId);
-    if (agent === undefined)
+    const session = sessions.get(agentId);
+    if (session === undefined)
     {
-        return;
+        return false;
     }
-    const ptyProcess = agent.pty;
+    const ptyProcess = session.pty;
     ptyProcess.kill();
+    return true;
 }
 
 //=================================================================================================
-// 현재 살아있는 에이전트 요약 목록을 반환한다.
+// 해당 에이전트가 실행 중인지 여부를 반환한다.
 //=================================================================================================
-function listAgents()
+function isAgentRunning(agentId)
 {
-    const agentInfoList = [];
-    for (const agent of agents.values())
+    const session = sessions.get(agentId);
+    if (session === undefined)
     {
-        const agentInfo =
-        {
-            id: agent.id,
-            title: agent.title,
-            cwd: agent.cwd
-        };
-        agentInfoList.push(agentInfo);
+        return false;
     }
-    return agentInfoList;
+    return true;
 }
 
 //=================================================================================================
-// 모든 에이전트를 종료한다. (앱 종료 시 정리용)
+// 현재 실행 중인 에이전트 아이디 목록을 반환한다.
 //=================================================================================================
-function killAllAgents()
+function listRunningAgentIds()
 {
-    for (const agent of agents.values())
+    const runningAgentIds = [];
+    for (const session of sessions.values())
     {
-        const ptyProcess = agent.pty;
+        const agentId = session.id;
+        runningAgentIds.push(agentId);
+    }
+    return runningAgentIds;
+}
+
+//=================================================================================================
+// 모든 에이전트 세션을 종료한다. (앱 종료 시 정리용)
+//=================================================================================================
+function stopAllAgents()
+{
+    for (const session of sessions.values())
+    {
+        const ptyProcess = session.pty;
         ptyProcess.kill();
     }
-    agents.clear();
+    sessions.clear();
 }
 
 module.exports =
 {
     setDataListener,
     setExitListener,
-    createAgent,
+    startAgent,
     writeToAgent,
     resizeAgent,
-    killAgent,
-    listAgents,
-    killAllAgents
+    stopAgent,
+    isAgentRunning,
+    listRunningAgentIds,
+    stopAllAgents
 };

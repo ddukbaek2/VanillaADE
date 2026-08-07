@@ -1,25 +1,20 @@
 //=================================================================================================
 // app.js
-// 렌더러 진입점. 셸(메뉴바 / 프로젝트영역 / 컨텐트영역 / 상태바)을 구성하고 뷰 전환과
-// 프로젝트 열기/생성 흐름을 관리한다.
+// 렌더러 진입점. 셸(메뉴바 / 에이전트영역 / 컨텐트영역 / 상태바)을 구성하고,
+// 에이전트 추가 · 선택 · 실행 · 제거 흐름을 관리한다.
 //=================================================================================================
 
 import { createMenubar } from "./menubar.js";
-import { createProjectPanel } from "./projectPanel.js";
+import { createAgentPanel } from "./agentPanel.js";
 import { renderStatusBar } from "./statusBar.js";
-import { dashboardView } from "./views/dashboard.js";
-import { repositoryView } from "./views/repository.js";
-import { devToolsView } from "./views/devTools.js";
-import { rulesView } from "./views/rules.js";
-import { tasksView } from "./views/tasks.js";
-import { historyView } from "./views/history.js";
-import { pipelineView } from "./views/pipeline.js";
-import { agentsView } from "./views/agents.js";
+import { openAgentDialog } from "./agentDialog.js";
+import { openContextMenu, openContextMenuAt } from "./contextMenu.js";
+import { agentTerminalView } from "./views/agentTerminal.js";
 import { settingsView } from "./views/settings.js";
-import { createStubView } from "./views/stub.js";
-import { initializeTerminalStore } from "./terminalStore.js";
+import { initializeTerminalStore, fitTerminal, disposeTerminal } from "./terminalStore.js";
 import { initializeSplitter } from "./splitter.js";
 import { initializeTheme } from "./themeManager.js";
+import { showToast } from "./toast.js";
 import { t } from "./locale.js";
 
 const System = globalThis;
@@ -28,166 +23,102 @@ const vanilla = window.vanilla;
 
 const applicationState =
 {
-    projectPath: null,
-    projectData: null,
-    currentViewId: "dashboard",
-    sidebarCollapsed: false
+    agents: [],
+    selectedAgentId: null,
+    contentMode: "agent",
+    panelCollapsed: false
 };
-
-//=================================================================================================
-// 프로젝트 영역에 나열될 뷰 목록. (위에서 아래 순서, 맨 아래는 항상 에이전트 목록)
-//=================================================================================================
-const projectView = createStubView("project");
-const platformView = createStubView("platform");
-const releaseView = createStubView("release");
-
-const views =
-[
-    dashboardView,
-    projectView,
-    repositoryView,
-    platformView,
-    releaseView,
-    pipelineView,
-    rulesView,
-    tasksView,
-    historyView,
-    agentsView,
-    devToolsView
-];
-
-//=================================================================================================
-// 각 뷰의 사이드바 아이콘(16x16 인라인 SVG, currentColor 스트로크).
-//=================================================================================================
-const viewIcons =
-{
-    dashboard: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"></rect><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"></rect><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"></rect></svg>",
-    project: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z\"></path></svg>",
-    platform: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polygon points=\"12 2 2 7 12 12 22 7 12 2\"></polygon><polyline points=\"2 17 12 22 22 17\"></polyline><polyline points=\"2 12 12 17 22 12\"></polyline></svg>",
-    release: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"16 16 12 12 8 16\"></polyline><line x1=\"12\" y1=\"12\" x2=\"12\" y2=\"21\"></line><path d=\"M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3\"></path></svg>",
-    repository: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"6\" y1=\"3\" x2=\"6\" y2=\"15\"></line><circle cx=\"18\" cy=\"6\" r=\"3\"></circle><circle cx=\"6\" cy=\"18\" r=\"3\"></circle><path d=\"M18 9a9 9 0 0 1-9 9\"></path></svg>",
-    "dev-tools": "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z\"></path></svg>",
-    pipeline: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"18\" cy=\"18\" r=\"3\"></circle><circle cx=\"6\" cy=\"6\" r=\"3\"></circle><path d=\"M6 21V9a9 9 0 0 0 9 9\"></path></svg>",
-    rules: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2\"></path><rect x=\"8\" y=\"2\" width=\"8\" height=\"4\" rx=\"1\" ry=\"1\"></rect></svg>",
-    tasks: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"9 11 12 14 22 4\"></polyline><path d=\"M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11\"></path></svg>",
-    history: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"10\"></circle><polyline points=\"12 6 12 12 16 14\"></polyline></svg>",
-    agents: "<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><polyline points=\"4 17 10 11 4 5\"></polyline><line x1=\"12\" y1=\"19\" x2=\"20\" y2=\"19\"></line></svg>"
-};
-
-for (const view of views)
-{
-    const viewIcon = viewIcons[view.id];
-    view.icon = viewIcon;
-}
-
-// 사이드바에는 없지만 메뉴로 진입 가능한 뷰(설정)를 포함한 전체 뷰 목록.
-const allViews = views.concat([settingsView]);
 
 const applicationElement = document.getElementById("application");
 const menubarElement = document.getElementById("menubar");
-const projectPanelElement = document.getElementById("project-panel");
+const agentPanelElement = document.getElementById("agent-panel");
 const splitterElement = document.getElementById("panel-splitter");
 const contentElement = document.getElementById("content-area");
 const statusBarElement = document.getElementById("status-bar");
 
 //=================================================================================================
-// 경로 문자열에서 마지막 폴더 이름을 추출한다.
+// 에이전트 아이디로 에이전트를 찾는다. (없으면 null)
 //=================================================================================================
-function getBaseName(pathString)
+function getAgentById(agentId)
 {
-    const normalizedPath = pathString.replace(/\\/g, "/");
-    const segments = normalizedPath.split("/");
-    let lastSegment = "";
-    for (const segment of segments)
+    for (const agent of applicationState.agents)
     {
-        if (segment.length > 0)
+        if (agent.id === agentId)
         {
-            lastSegment = segment;
-        }
-    }
-    return lastSegment;
-}
-
-//=================================================================================================
-// 뷰 아이디로 뷰 객체를 찾는다. (없으면 null)
-//=================================================================================================
-function getViewById(viewId)
-{
-    for (const view of allViews)
-    {
-        if (view.id === viewId)
-        {
-            return view;
+            return agent;
         }
     }
     return null;
 }
 
 //=================================================================================================
-// 뷰에 전달할 컨텍스트를 생성한다.
+// 현재 선택된 에이전트를 반환한다. (없으면 null)
 //=================================================================================================
-function createViewContext()
+function getSelectedAgent()
 {
-    const viewContext =
+    const selectedAgentId = applicationState.selectedAgentId;
+    if (selectedAgentId === null)
     {
-        projectPath: applicationState.projectPath,
-        projectData: applicationState.projectData,
-        openProject: openProject,
-        selectView: selectView
-    };
-    return viewContext;
+        return null;
+    }
+    const selectedAgent = getAgentById(selectedAgentId);
+    return selectedAgent;
 }
 
 //=================================================================================================
-// 현재 선택된 뷰를 컨텐트 영역에 렌더링한다.
+// 에이전트 목록을 메인 프로세스에서 다시 읽어온다. 선택 항목이 사라졌으면 선택을 해제한다.
+//=================================================================================================
+async function reloadAgents()
+{
+    const agentList = await vanilla.listAgents();
+    applicationState.agents = agentList;
+
+    const selectedAgent = getSelectedAgent();
+    if (selectedAgent === null)
+    {
+        applicationState.selectedAgentId = null;
+    }
+}
+
+//=================================================================================================
+// 에이전트 패널을 렌더링한다.
+//=================================================================================================
+function renderAgentPanel()
+{
+    const panelContext =
+    {
+        agents: applicationState.agents,
+        selectedAgentId: applicationState.selectedAgentId,
+        isCollapsed: applicationState.panelCollapsed,
+        onSelectAgent: selectAgent,
+        onToggleCollapse: togglePanel,
+        onAddAgent: openAddAgentDialog,
+        onOpenAgentMenu: openAgentMenu
+    };
+    createAgentPanel(agentPanelElement, panelContext);
+}
+
+//=================================================================================================
+// 컨텐트 영역을 렌더링한다. (에이전트 대화 화면 또는 설정 화면)
 //=================================================================================================
 function renderContent()
 {
-    const currentViewId = applicationState.currentViewId;
-    const currentView = getViewById(currentViewId);
-    if (currentView === null)
+    const contentMode = applicationState.contentMode;
+    if (contentMode === "settings")
     {
+        const settingsContext = {};
+        settingsView.render(contentElement, settingsContext);
         return;
     }
-    const viewContext = createViewContext();
-    currentView.render(contentElement, viewContext);
-}
 
-//=================================================================================================
-// 프로젝트 패널을 렌더링한다.
-//=================================================================================================
-function renderProjectPanel()
-{
-    const activeViewId = applicationState.currentViewId;
-    const headerLabel = t("nav.header");
-    const isCollapsed = applicationState.sidebarCollapsed;
-    createProjectPanel(projectPanelElement, headerLabel, views, activeViewId, selectView, isCollapsed, toggleSidebar, openDetachedView);
-}
-
-//=================================================================================================
-// 지정한 뷰를 별도 창으로 연다.
-//=================================================================================================
-function openDetachedView(viewId)
-{
-    vanilla.openViewWindow(viewId);
-}
-
-//=================================================================================================
-// 프로젝트 영역(사이드바)을 아이콘만 보기로 접거나 편다.
-//=================================================================================================
-function toggleSidebar()
-{
-    const nextCollapsed = applicationState.sidebarCollapsed === false;
-    applicationState.sidebarCollapsed = nextCollapsed;
-    if (nextCollapsed === true)
+    const selectedAgent = getSelectedAgent();
+    const viewContext =
     {
-        applicationElement.classList.add("sidebar-collapsed");
-    }
-    else
-    {
-        applicationElement.classList.remove("sidebar-collapsed");
-    }
-    renderProjectPanel();
+        agent: selectedAgent,
+        onStartAgent: startAgentSession,
+        onStopAgent: stopAgentSession
+    };
+    agentTerminalView.render(contentElement, viewContext);
 }
 
 //=================================================================================================
@@ -195,10 +126,10 @@ function toggleSidebar()
 //=================================================================================================
 function renderStatus()
 {
+    const selectedAgent = getSelectedAgent();
     const statusContext =
     {
-        projectPath: applicationState.projectPath,
-        projectData: applicationState.projectData
+        agent: selectedAgent
     };
     renderStatusBar(statusBarElement, statusContext);
 }
@@ -208,77 +139,280 @@ function renderStatus()
 //=================================================================================================
 function renderAll()
 {
-    renderProjectPanel();
+    renderAgentPanel();
     renderStatus();
     renderContent();
 }
 
 //=================================================================================================
-// 뷰를 전환한다.
+// 에이전트 영역을 좁게 접거나 편다.
 //=================================================================================================
-function selectView(viewId)
+function togglePanel()
 {
-    applicationState.currentViewId = viewId;
-    renderProjectPanel();
-    renderContent();
+    const nextCollapsed = applicationState.panelCollapsed === false;
+    applicationState.panelCollapsed = nextCollapsed;
+    if (nextCollapsed === true)
+    {
+        applicationElement.classList.add("panel-collapsed");
+    }
+    else
+    {
+        applicationElement.classList.remove("panel-collapsed");
+    }
+    renderAgentPanel();
+    fitSelectedTerminal();
 }
 
 //=================================================================================================
-// 불러온 프로젝트를 상태에 반영하고 화면을 갱신한다.
+// 현재 표시 중인 터미널을 컨텐트 영역 크기에 맞춘다.
 //=================================================================================================
-function applyProject(loadResult)
+function fitSelectedTerminal()
 {
-    applicationState.projectPath = loadResult.path;
-    applicationState.projectData = loadResult.data;
+    const contentMode = applicationState.contentMode;
+    if (contentMode !== "agent")
+    {
+        return;
+    }
+    const selectedAgent = getSelectedAgent();
+    if (selectedAgent === null)
+    {
+        return;
+    }
+    const selectedAgentId = selectedAgent.id;
+    fitTerminal(selectedAgentId);
+}
+
+//=================================================================================================
+// 에이전트 세션을 시작하고 화면을 갱신한다.
+//=================================================================================================
+async function startAgentSession(agentId)
+{
+    const agent = getAgentById(agentId);
+    if (agent === null)
+    {
+        return;
+    }
+    const startResult = await vanilla.startAgent(agentId, agent.directory, agent.kind);
+    if (startResult.ok === false)
+    {
+        showToast(t("agent.startFailed"));
+    }
+    await reloadAgents();
     renderAll();
 }
 
 //=================================================================================================
-// 지정한 경로의 프로젝트를 연다. (없으면 생성 여부를 묻는다)
+// 에이전트 세션을 종료하고 화면을 갱신한다.
 //=================================================================================================
-async function openProjectByPath(projectDirectoryPath)
+async function stopAgentSession(agentId)
 {
-    const loadResult = await vanilla.loadProject(projectDirectoryPath);
-    if (loadResult.exists === false)
+    await vanilla.stopAgent(agentId);
+    await reloadAgents();
+    renderAll();
+}
+
+//=================================================================================================
+// 에이전트를 선택한다. 실행 중이 아니면 세션을 시작한다.
+//=================================================================================================
+async function selectAgent(agentId)
+{
+    applicationState.selectedAgentId = agentId;
+    applicationState.contentMode = "agent";
+
+    const agent = getAgentById(agentId);
+    if (agent === null)
     {
-        const shouldInitialize = window.confirm(t("app.confirmCreateProject"));
-        if (shouldInitialize === false)
+        renderAll();
+        return;
+    }
+
+    const isRunning = agent.running;
+    if (isRunning === true)
+    {
+        renderAll();
+        return;
+    }
+
+    renderAll();
+    await startAgentSession(agentId);
+}
+
+//=================================================================================================
+// 에이전트 추가 팝업을 연다.
+//=================================================================================================
+function openAddAgentDialog()
+{
+    const dialogOptions =
+    {
+        mode: "add",
+        agent: null,
+        onSubmit: async function (formValues)
         {
-            return;
+            const addResult = await vanilla.addAgent(formValues.directory, formValues.name, formValues.kind);
+            if (addResult.ok === false)
+            {
+                const failureReason = addResult.reason;
+                if (failureReason === "duplicate")
+                {
+                    const duplicateResult =
+                    {
+                        ok: false,
+                        message: t("agent.duplicate")
+                    };
+                    return duplicateResult;
+                }
+                const failedResult =
+                {
+                    ok: false,
+                    message: t("agent.addFailed", [addResult.message])
+                };
+                return failedResult;
+            }
+
+            await reloadAgents();
+            const addedAgent = addResult.agent;
+            const addedAgentId = addedAgent.id;
+            await selectAgent(addedAgentId);
+
+            const successResult =
+            {
+                ok: true
+            };
+            return successResult;
         }
-        const projectName = getBaseName(projectDirectoryPath);
-        const initializeResult = await vanilla.initializeProject(projectDirectoryPath, projectName);
-        applyProject(initializeResult);
-        await vanilla.setLastProjectPath(projectDirectoryPath);
-        return;
-    }
-    applyProject(loadResult);
-    await vanilla.setLastProjectPath(projectDirectoryPath);
+    };
+    openAgentDialog(dialogOptions);
 }
 
 //=================================================================================================
-// 폴더 선택 다이얼로그로 프로젝트를 연다.
+// 에이전트 설정 팝업을 연다. (이름 / 종류 변경)
 //=================================================================================================
-async function openProject()
+function openAgentSettingsDialog(agent)
 {
-    const selectedPath = await vanilla.openProjectDialog();
-    if (selectedPath === null)
+    const dialogOptions =
+    {
+        mode: "edit",
+        agent: agent,
+        onSubmit: async function (formValues)
+        {
+            const updateResult = await vanilla.updateAgent(formValues.directory, formValues.name, formValues.kind);
+            if (updateResult.ok === false)
+            {
+                const failedResult =
+                {
+                    ok: false,
+                    message: t("agent.addFailed", [updateResult.reason])
+                };
+                return failedResult;
+            }
+
+            // 종류가 바뀌면 실행 중인 세션은 이전 종류로 돌고 있으므로 종료한다.
+            const previousKind = agent.kind;
+            const isKindChanged = previousKind !== formValues.kind;
+            const isRunning = agent.running;
+            if (isKindChanged === true && isRunning === true)
+            {
+                await vanilla.stopAgent(agent.id);
+            }
+
+            await reloadAgents();
+            renderAll();
+
+            const successResult =
+            {
+                ok: true
+            };
+            return successResult;
+        }
+    };
+    openAgentDialog(dialogOptions);
+}
+
+//=================================================================================================
+// 에이전트를 제거한다. (세션 종료 + 등록 해제, 폴더 자체는 유지)
+//=================================================================================================
+async function removeAgent(agent)
+{
+    const confirmMessage = t("agent.confirmRemove", [agent.name]);
+    const isConfirmed = window.confirm(confirmMessage);
+    if (isConfirmed === false)
     {
         return;
     }
-    await openProjectByPath(selectedPath);
+
+    const agentId = agent.id;
+    await vanilla.removeAgent(agentId, agent.directory);
+    disposeTerminal(agentId);
+
+    if (applicationState.selectedAgentId === agentId)
+    {
+        applicationState.selectedAgentId = null;
+    }
+    await reloadAgents();
+    renderAll();
 }
 
 //=================================================================================================
-// 현재 프로젝트를 닫는다. (열린 프로젝트 없음 상태로 전환)
+// 에이전트 컨텍스트 메뉴를 연다. (더보기 버튼 또는 우클릭)
 //=================================================================================================
-async function closeProject()
+function openAgentMenu(agent, anchorElement, clientX, clientY)
 {
-    applicationState.projectPath = null;
-    applicationState.projectData = null;
-    applicationState.currentViewId = "dashboard";
-    renderAll();
-    await vanilla.setLastProjectPath(null);
+    const menuItems = [];
+
+    const agentId = agent.id;
+    const isRunning = agent.running;
+    if (isRunning === true)
+    {
+        const stopItem =
+        {
+            label: t("agent.stop"),
+            action: function ()
+            {
+                stopAgentSession(agentId);
+            }
+        };
+        menuItems.push(stopItem);
+    }
+    else
+    {
+        const startItem =
+        {
+            label: t("agent.start"),
+            action: function ()
+            {
+                startAgentSession(agentId);
+            }
+        };
+        menuItems.push(startItem);
+    }
+
+    const settingsItem =
+    {
+        label: t("agent.settings"),
+        action: function ()
+        {
+            openAgentSettingsDialog(agent);
+        }
+    };
+    menuItems.push(settingsItem);
+
+    const removeItem =
+    {
+        label: t("agent.remove"),
+        variant: "danger",
+        action: function ()
+        {
+            removeAgent(agent);
+        }
+    };
+    menuItems.push(removeItem);
+
+    if (anchorElement !== null)
+    {
+        openContextMenu(anchorElement, menuItems);
+        return;
+    }
+    openContextMenuAt(clientX, clientY, menuItems);
 }
 
 //=================================================================================================
@@ -286,7 +420,8 @@ async function closeProject()
 //=================================================================================================
 function openSettings()
 {
-    selectView("settings");
+    applicationState.contentMode = "settings";
+    renderContent();
 }
 
 //=================================================================================================
@@ -302,14 +437,9 @@ function buildMenuDefinitions()
             items:
             [
                 {
-                    label: t("menu.openProject"),
-                    accelerator: "Ctrl+O",
-                    action: openProject
-                },
-                {
-                    label: t("menu.closeProject"),
-                    accelerator: "Ctrl+W",
-                    action: closeProject
+                    label: t("menu.addAgent"),
+                    accelerator: "Ctrl+N",
+                    action: openAddAgentDialog
                 },
                 {
                     label: t("menu.preferences"),
@@ -379,21 +509,6 @@ function buildMenuDefinitions()
             ]
         },
         {
-            label: t("menu.view"),
-            mnemonic: "v",
-            items:
-            [
-                {
-                    label: t("menu.dashboard"),
-                    accelerator: "Ctrl+1",
-                    action: function ()
-                    {
-                        selectView("dashboard");
-                    }
-                }
-            ]
-        },
-        {
             label: t("menu.help"),
             mnemonic: "h",
             items:
@@ -413,12 +528,26 @@ function buildMenuDefinitions()
 }
 
 //=================================================================================================
+// 에이전트 세션 종료 이벤트를 받아 목록의 실행 상태를 갱신한다.
+//=================================================================================================
+function handleAgentExit(payload)
+{
+    reloadAgents().then(function ()
+    {
+        renderAgentPanel();
+        renderStatus();
+    });
+}
+
+//=================================================================================================
 // 애플리케이션을 초기화한다.
 //=================================================================================================
 async function initializeApplication()
 {
     initializeTheme();
     initializeTerminalStore();
+    vanilla.onAgentExit(handleAgentExit);
+
     const platform = vanilla.platform;
     if (platform === "darwin")
     {
@@ -426,70 +555,15 @@ async function initializeApplication()
     }
     const menuDefinitions = buildMenuDefinitions();
     createMenubar(menubarElement, "Vanilla ADE", menuDefinitions);
-    initializeSplitter(splitterElement, applicationElement);
+    initializeSplitter(splitterElement, applicationElement, fitSelectedTerminal);
+
+    window.addEventListener("resize", function (resizeEvent)
+    {
+        fitSelectedTerminal();
+    });
+
+    await reloadAgents();
     renderAll();
-
-    const lastProjectPath = await vanilla.getLastProjectPath();
-    if (lastProjectPath !== null)
-    {
-        const loadResult = await vanilla.loadProject(lastProjectPath);
-        if (loadResult.exists === true)
-        {
-            applyProject(loadResult);
-        }
-    }
 }
 
-//=================================================================================================
-// URL 해시(#view=<id>)에서 분리 창으로 열린 뷰 아이디를 읽는다. (없으면 null)
-//=================================================================================================
-function getDetachedViewId()
-{
-    const hashText = window.location.hash;
-    const prefix = "#view=";
-    if (hashText.indexOf(prefix) !== 0)
-    {
-        return null;
-    }
-    const viewId = hashText.substring(prefix.length);
-    if (viewId.length === 0)
-    {
-        return null;
-    }
-    return viewId;
-}
-
-//=================================================================================================
-// 분리(별도) 창을 초기화한다. 셸(메뉴바/사이드바/상태바) 없이 지정한 뷰만 전체 화면으로 렌더한다.
-//=================================================================================================
-async function initializeDetachedWindow(viewId)
-{
-    applicationElement.classList.add("detached-mode");
-    initializeTheme();
-    initializeTerminalStore();
-    applicationState.currentViewId = viewId;
-    const navLabelKey = "nav." + viewId;
-    document.title = t(navLabelKey) + " — Vanilla ADE";
-
-    const lastProjectPath = await vanilla.getLastProjectPath();
-    if (lastProjectPath !== null)
-    {
-        const loadResult = await vanilla.loadProject(lastProjectPath);
-        if (loadResult.exists === true)
-        {
-            applicationState.projectPath = loadResult.path;
-            applicationState.projectData = loadResult.data;
-        }
-    }
-    renderContent();
-}
-
-const detachedViewId = getDetachedViewId();
-if (detachedViewId === null)
-{
-    initializeApplication();
-}
-else
-{
-    initializeDetachedWindow(detachedViewId);
-}
+initializeApplication();

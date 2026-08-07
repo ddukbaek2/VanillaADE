@@ -1,6 +1,6 @@
 {
     "name": "vanilla-ade",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "AI 기반 크로스플랫폼 애플리케이션 개발 환경 (ADE)",
     "main": "src/main/main.js",
     "scripts": {

@@ -66,13 +66,39 @@ function handleAgentExit(payload)
 }
 
 //=================================================================================================
+// 살아있는 모든 터미널에 현재 테마 색을 다시 적용한다.
+//=================================================================================================
+function applyThemeToTerminals()
+{
+    const terminalTheme = buildTerminalTheme();
+    for (const entry of terminalEntries.values())
+    {
+        const terminal = entry.terminal;
+        terminal.options.theme = terminalTheme;
+    }
+}
+
+//=================================================================================================
 // 전역 이벤트 구독을 초기화한다. (앱 시작 시 1회 호출)
+// 테마 전환(<html> 의 data-theme 변경)은 이미 만들어진 터미널에도 반영한다.
 //=================================================================================================
 export function initializeTerminalStore()
 {
     const vanilla = window.vanilla;
     vanilla.onAgentData(handleAgentData);
     vanilla.onAgentExit(handleAgentExit);
+
+    const rootElement = document.documentElement;
+    const themeObserver = new window.MutationObserver(function (mutationRecords)
+    {
+        applyThemeToTerminals();
+    });
+    const observerOptions =
+    {
+        attributes: true,
+        attributeFilter: ["data-theme"]
+    };
+    themeObserver.observe(rootElement, observerOptions);
 }
 
 //=================================================================================================

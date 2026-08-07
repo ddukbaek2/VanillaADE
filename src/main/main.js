@@ -5,24 +5,13 @@
 
 const System = globalThis;
 const nodePath = require("node:path");
-const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, shell } = require("electron");
-const project = require("./project");
-const store = require("./store");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require("electron");
 const agentManager = require("./agentManager");
-const repository = require("./repository");
-const devTools = require("./devTools");
-const collection = require("./collection");
-
-const RULES_FILE_NAME = "rules.json";
-const TASKS_FILE_NAME = "tasks.json";
-const HISTORY_FILE_NAME = "history.json";
-const PIPELINES_FILE_NAME = "pipelines.json";
-const ACTIONS_FILE_NAME = "actions.json";
+const agentStore = require("./agentStore");
 
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
-const viewWindows = new System.Map();
 
 // GPU 가속이 불필요하고, 가상화/원격 환경에서 GPU 초기화 실패로 렌더러가 죽는 것을 방지한다.
 app.disableHardwareAcceleration();
@@ -112,53 +101,6 @@ function showMainWindow()
 }
 
 //=================================================================================================
-// 특정 뷰를 별도 창으로 연다. (이미 열려있으면 포커스) — 다중 모니터 배치를 위한 창 분리.
-//=================================================================================================
-function openViewWindow(viewId)
-{
-    const existingWindow = viewWindows.get(viewId);
-    if (existingWindow !== undefined && existingWindow.isDestroyed() === false)
-    {
-        existingWindow.focus();
-        return;
-    }
-
-    const preloadPath = nodePath.join(__dirname, "preload.js");
-    const iconPath = nodePath.join(__dirname, "..", "..", "assets", "icon-dark.png");
-    const windowOptions =
-    {
-        width: 1100,
-        height: 820,
-        minWidth: 520,
-        minHeight: 420,
-        backgroundColor: "#2a2620",
-        icon: iconPath,
-        webPreferences:
-        {
-            preload: preloadPath,
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: false
-        }
-    };
-    const viewWindow = new BrowserWindow(windowOptions);
-    viewWindow.setMenuBarVisibility(false);
-
-    const indexHtmlPath = nodePath.join(__dirname, "..", "renderer", "index.html");
-    const loadOptions =
-    {
-        hash: "view=" + viewId
-    };
-    viewWindow.loadFile(indexHtmlPath, loadOptions);
-
-    viewWindows.set(viewId, viewWindow);
-    viewWindow.on("closed", function ()
-    {
-        viewWindows.delete(viewId);
-    });
-}
-
-//=================================================================================================
 // 시스템 트레이를 생성한다.
 //=================================================================================================
 function createTray()
@@ -202,12 +144,12 @@ function createTray()
 //=================================================================================================
 function registerIpcHandlers()
 {
-    ipcMain.handle("project:open-dialog", async function ()
+    ipcMain.handle("dialog:select-directory", async function ()
     {
         const dialogOptions =
         {
-            title: "프로젝트 폴더 선택",
-            properties: ["openDirectory"]
+            title: "에이전트 폴더 선택",
+            properties: ["openDirectory", "createDirectory"]
         };
         const dialogResult = await dialog.showOpenDialog(mainWindow, dialogOptions);
         if (dialogResult.canceled === true)
@@ -219,63 +161,47 @@ function registerIpcHandlers()
         return selectedPath;
     });
 
-    ipcMain.handle("project:load", async function (ipcEvent, projectDirectoryPath)
+    ipcMain.handle("agent:list", async function ()
     {
-        const projectExists = await project.hasVanillaProject(projectDirectoryPath);
-        if (projectExists === false)
+        const agentList = await agentStore.listAgents();
+        for (const agent of agentList)
         {
-            const notFoundResult =
-            {
-                exists: false,
-                path: projectDirectoryPath
-            };
-            return notFoundResult;
+            const agentId = agent.id;
+            const isRunning = agentManager.isAgentRunning(agentId);
+            agent.running = isRunning;
         }
-        const projectData = await project.readProject(projectDirectoryPath);
-        const loadResult =
-        {
-            exists: true,
-            path: projectDirectoryPath,
-            data: projectData
-        };
-        return loadResult;
+        return agentList;
     });
 
-    ipcMain.handle("project:initialize", async function (ipcEvent, projectDirectoryPath, projectName)
+    ipcMain.handle("agent:add", async function (ipcEvent, agentDirectoryPath, agentName, agentKind)
     {
-        const projectData = await project.initializeProject(projectDirectoryPath, projectName);
-        const initializeResult =
-        {
-            exists: true,
-            path: projectDirectoryPath,
-            data: projectData
-        };
-        return initializeResult;
+        const addResult = await agentStore.addAgent(agentDirectoryPath, agentName, agentKind);
+        return addResult;
     });
 
-    ipcMain.handle("store:get-last-project", async function ()
+    ipcMain.handle("agent:update", async function (ipcEvent, agentDirectoryPath, agentName, agentKind)
     {
-        const storeData = await store.readStore();
-        const lastProjectPath = storeData.lastProjectPath;
-        if (lastProjectPath === undefined)
-        {
-            return null;
-        }
-        return lastProjectPath;
+        const updateResult = await agentStore.updateAgent(agentDirectoryPath, agentName, agentKind);
+        return updateResult;
     });
 
-    ipcMain.handle("store:set-last-project", async function (ipcEvent, projectDirectoryPath)
+    ipcMain.handle("agent:remove", async function (ipcEvent, agentId, agentDirectoryPath)
     {
-        const storeData = await store.readStore();
-        storeData.lastProjectPath = projectDirectoryPath;
-        await store.writeStore(storeData);
-        return true;
+        agentManager.stopAgent(agentId);
+        const removeResult = await agentStore.removeAgent(agentDirectoryPath);
+        return removeResult;
     });
 
-    ipcMain.handle("agent:create", async function (ipcEvent, workingDirectory)
+    ipcMain.handle("agent:start", async function (ipcEvent, agentId, agentDirectoryPath, agentKind)
     {
-        const agentInfo = agentManager.createAgent(workingDirectory);
-        return agentInfo;
+        const startResult = agentManager.startAgent(agentId, agentDirectoryPath, agentKind);
+        return startResult;
+    });
+
+    ipcMain.handle("agent:stop", async function (ipcEvent, agentId)
+    {
+        const stopResult = agentManager.stopAgent(agentId);
+        return stopResult;
     });
 
     ipcMain.on("agent:write", function (ipcEvent, agentId, data)
@@ -286,47 +212,6 @@ function registerIpcHandlers()
     ipcMain.on("agent:resize", function (ipcEvent, agentId, columns, rows)
     {
         agentManager.resizeAgent(agentId, columns, rows);
-    });
-
-    ipcMain.handle("agent:kill", async function (ipcEvent, agentId)
-    {
-        agentManager.killAgent(agentId);
-        return true;
-    });
-
-    ipcMain.handle("agent:list", async function ()
-    {
-        const agentInfoList = agentManager.listAgents();
-        return agentInfoList;
-    });
-
-    ipcMain.handle("repository:info", async function (ipcEvent, projectDirectoryPath)
-    {
-        const repositoryInfo = await repository.getRepositoryInfo(projectDirectoryPath);
-        return repositoryInfo;
-    });
-
-    ipcMain.handle("dev-tools:list", async function ()
-    {
-        const toolInfoList = await devTools.listTools();
-        return toolInfoList;
-    });
-
-    ipcMain.handle("window:open-view", async function (ipcEvent, viewId)
-    {
-        openViewWindow(viewId);
-        return true;
-    });
-
-    ipcMain.handle("shell:open-external", async function (ipcEvent, externalUrl)
-    {
-        const isHttpUrl = externalUrl.indexOf("https://") === 0 || externalUrl.indexOf("http://") === 0;
-        if (isHttpUrl === false)
-        {
-            return false;
-        }
-        await shell.openExternal(externalUrl);
-        return true;
     });
 
     ipcMain.handle("window:theme-changed", async function (ipcEvent, themeName)
@@ -385,90 +270,6 @@ function registerIpcHandlers()
         {
             return false;
         }
-    });
-
-    ipcMain.handle("rules:list", async function (ipcEvent, projectDirectoryPath)
-    {
-        const items = await collection.listItems(projectDirectoryPath, RULES_FILE_NAME);
-        return items;
-    });
-
-    ipcMain.handle("rules:save", async function (ipcEvent, projectDirectoryPath, ruleItem)
-    {
-        const savedItem = await collection.saveItem(projectDirectoryPath, RULES_FILE_NAME, ruleItem);
-        return savedItem;
-    });
-
-    ipcMain.handle("rules:delete", async function (ipcEvent, projectDirectoryPath, ruleId)
-    {
-        const result = await collection.deleteItem(projectDirectoryPath, RULES_FILE_NAME, ruleId);
-        return result;
-    });
-
-    ipcMain.handle("tasks:list", async function (ipcEvent, projectDirectoryPath)
-    {
-        const items = await collection.listItems(projectDirectoryPath, TASKS_FILE_NAME);
-        return items;
-    });
-
-    ipcMain.handle("tasks:save", async function (ipcEvent, projectDirectoryPath, taskItem)
-    {
-        const savedItem = await collection.saveItem(projectDirectoryPath, TASKS_FILE_NAME, taskItem);
-        return savedItem;
-    });
-
-    ipcMain.handle("tasks:delete", async function (ipcEvent, projectDirectoryPath, taskId)
-    {
-        const result = await collection.deleteItem(projectDirectoryPath, TASKS_FILE_NAME, taskId);
-        return result;
-    });
-
-    ipcMain.handle("history:list", async function (ipcEvent, projectDirectoryPath)
-    {
-        const items = await collection.listItems(projectDirectoryPath, HISTORY_FILE_NAME);
-        return items;
-    });
-
-    ipcMain.handle("history:append", async function (ipcEvent, projectDirectoryPath, historyItem)
-    {
-        const savedItem = await collection.saveItem(projectDirectoryPath, HISTORY_FILE_NAME, historyItem);
-        return savedItem;
-    });
-
-    ipcMain.handle("history:delete", async function (ipcEvent, projectDirectoryPath, historyId)
-    {
-        const result = await collection.deleteItem(projectDirectoryPath, HISTORY_FILE_NAME, historyId);
-        return result;
-    });
-
-    ipcMain.handle("pipelines:list", async function (ipcEvent, projectDirectoryPath)
-    {
-        const items = await collection.listItems(projectDirectoryPath, PIPELINES_FILE_NAME);
-        return items;
-    });
-
-    ipcMain.handle("pipelines:save", async function (ipcEvent, projectDirectoryPath, pipelineItem)
-    {
-        const savedItem = await collection.saveItem(projectDirectoryPath, PIPELINES_FILE_NAME, pipelineItem);
-        return savedItem;
-    });
-
-    ipcMain.handle("pipelines:delete", async function (ipcEvent, projectDirectoryPath, pipelineId)
-    {
-        const result = await collection.deleteItem(projectDirectoryPath, PIPELINES_FILE_NAME, pipelineId);
-        return result;
-    });
-
-    ipcMain.handle("actions:list", async function (ipcEvent, projectDirectoryPath)
-    {
-        const items = await collection.listItems(projectDirectoryPath, ACTIONS_FILE_NAME);
-        return items;
-    });
-
-    ipcMain.handle("actions:save", async function (ipcEvent, projectDirectoryPath, actionItem)
-    {
-        const savedItem = await collection.saveItem(projectDirectoryPath, ACTIONS_FILE_NAME, actionItem);
-        return savedItem;
     });
 }
 
@@ -544,7 +345,7 @@ app.whenReady().then(function ()
 app.on("before-quit", function ()
 {
     isQuitting = true;
-    agentManager.killAllAgents();
+    agentManager.stopAllAgents();
 });
 
 // 창을 모두 닫아도 트레이에 상주해야 하므로 종료하지 않는다.

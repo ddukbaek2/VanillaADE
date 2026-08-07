@@ -1,6 +1,6 @@
 //=================================================================================================
 // splitter.js
-// 프로젝트 영역과 컨텐트 영역 사이의 구분선을 마우스로 드래그해 프로젝트 영역 너비를 조절한다.
+// 에이전트 영역과 컨텐트 영역 사이의 구분선을 마우스로 드래그해 에이전트 영역 너비를 조절한다.
 //=================================================================================================
 
 const System = globalThis;
@@ -11,8 +11,9 @@ const MAXIMUM_PANEL_WIDTH = 560;
 //=================================================================================================
 // 구분선 드래그 리사이즈를 초기화한다.
 // splitterElement: 구분선 엘리먼트, applicationElement: 그리드 컨테이너(#application)
+// onResize: 너비가 바뀔 때마다 호출되는 콜백
 //=================================================================================================
-export function initializeSplitter(splitterElement, applicationElement)
+export function initializeSplitter(splitterElement, applicationElement, onResize)
 {
     let isDragging = false;
 
@@ -40,7 +41,8 @@ export function initializeSplitter(splitterElement, applicationElement)
         const rawWidth = pointerX - applicationBounds.left;
         const clampedWidth = clampWidth(rawWidth);
         const rootStyle = applicationElement.style;
-        rootStyle.setProperty("--project-panel-width", clampedWidth + "px");
+        rootStyle.setProperty("--agent-panel-width", clampedWidth + "px");
+        onResize();
     }
 
     function handlePointerUp(pointerUpEvent)

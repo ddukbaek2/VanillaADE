@@ -36,56 +36,65 @@ const vanillaApi =
     platform: process.platform,
 
     //=========================================================================================
-    // 프로젝트 폴더 선택 다이얼로그를 띄우고 선택된 경로(또는 null)를 반환한다.
+    // 폴더 선택 다이얼로그를 띄우고 선택된 경로(또는 null)를 반환한다.
     //=========================================================================================
-    openProjectDialog: function ()
+    selectDirectory: function ()
     {
-        const resultPromise = ipcRenderer.invoke("project:open-dialog");
+        const resultPromise = ipcRenderer.invoke("dialog:select-directory");
         return resultPromise;
     },
 
     //=========================================================================================
-    // 지정한 폴더의 Vanilla 프로젝트 정보를 불러온다.
+    // 등록된 에이전트 목록을 반환한다. (각 항목에 실행 여부 running 포함)
     //=========================================================================================
-    loadProject: function (projectDirectoryPath)
+    listAgents: function ()
     {
-        const resultPromise = ipcRenderer.invoke("project:load", projectDirectoryPath);
+        const resultPromise = ipcRenderer.invoke("agent:list");
         return resultPromise;
     },
 
     //=========================================================================================
-    // 지정한 폴더에 새 Vanilla 프로젝트를 생성한다.
+    // 지정 폴더에 새 에이전트를 등록한다.
     //=========================================================================================
-    initializeProject: function (projectDirectoryPath, projectName)
+    addAgent: function (agentDirectoryPath, agentName, agentKind)
     {
-        const resultPromise = ipcRenderer.invoke("project:initialize", projectDirectoryPath, projectName);
+        const resultPromise = ipcRenderer.invoke("agent:add", agentDirectoryPath, agentName, agentKind);
         return resultPromise;
     },
 
     //=========================================================================================
-    // 마지막으로 연 프로젝트 경로를 반환한다. (없으면 null)
+    // 등록된 에이전트의 이름 / 종류를 갱신한다.
     //=========================================================================================
-    getLastProjectPath: function ()
+    updateAgent: function (agentDirectoryPath, agentName, agentKind)
     {
-        const resultPromise = ipcRenderer.invoke("store:get-last-project");
+        const resultPromise = ipcRenderer.invoke("agent:update", agentDirectoryPath, agentName, agentKind);
         return resultPromise;
     },
 
     //=========================================================================================
-    // 마지막으로 연 프로젝트 경로를 저장한다.
+    // 에이전트 등록을 해제한다. (실행 중이면 종료한 뒤 제거)
     //=========================================================================================
-    setLastProjectPath: function (projectDirectoryPath)
+    removeAgent: function (agentId, agentDirectoryPath)
     {
-        const resultPromise = ipcRenderer.invoke("store:set-last-project", projectDirectoryPath);
+        const resultPromise = ipcRenderer.invoke("agent:remove", agentId, agentDirectoryPath);
         return resultPromise;
     },
 
     //=========================================================================================
-    // 새 에이전트(터미널 세션)를 생성하고 요약 정보를 반환한다.
+    // 에이전트 세션을 시작한다.
     //=========================================================================================
-    createAgent: function (workingDirectory)
+    startAgent: function (agentId, agentDirectoryPath, agentKind)
     {
-        const resultPromise = ipcRenderer.invoke("agent:create", workingDirectory);
+        const resultPromise = ipcRenderer.invoke("agent:start", agentId, agentDirectoryPath, agentKind);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 에이전트 세션을 종료한다.
+    //=========================================================================================
+    stopAgent: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:stop", agentId);
         return resultPromise;
     },
 
@@ -103,24 +112,6 @@ const vanillaApi =
     resizeAgent: function (agentId, columns, rows)
     {
         ipcRenderer.send("agent:resize", agentId, columns, rows);
-    },
-
-    //=========================================================================================
-    // 에이전트를 종료한다.
-    //=========================================================================================
-    killAgent: function (agentId)
-    {
-        const resultPromise = ipcRenderer.invoke("agent:kill", agentId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 현재 살아있는 에이전트 요약 목록을 반환한다.
-    //=========================================================================================
-    listAgents: function ()
-    {
-        const resultPromise = ipcRenderer.invoke("agent:list");
-        return resultPromise;
     },
 
     //=========================================================================================
@@ -158,24 +149,6 @@ const vanillaApi =
     },
 
     //=========================================================================================
-    // 프로젝트 폴더의 Git 저장소 연결 정보를 반환한다.
-    //=========================================================================================
-    getRepositoryInfo: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("repository:info", projectDirectoryPath);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 지원 개발 도구들의 설치 여부/버전 목록을 반환한다.
-    //=========================================================================================
-    listDevTools: function ()
-    {
-        const resultPromise = ipcRenderer.invoke("dev-tools:list");
-        return resultPromise;
-    },
-
-    //=========================================================================================
     // 커스텀 타이틀바(창 컨트롤 오버레이)의 색을 갱신한다. (Windows/Linux)
     //=========================================================================================
     setTitleBarOverlay: function (overlayOptions)
@@ -185,119 +158,11 @@ const vanillaApi =
     },
 
     //=========================================================================================
-    // 특정 뷰를 별도 창으로 연다. (다중 모니터 배치용)
-    //=========================================================================================
-    openViewWindow: function (viewId)
-    {
-        const resultPromise = ipcRenderer.invoke("window:open-view", viewId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
     // 현재 테마를 메인 프로세스에 알린다. (창/트레이 아이콘을 테마에 맞춰 교체)
     //=========================================================================================
     notifyTheme: function (themeName)
     {
         const resultPromise = ipcRenderer.invoke("window:theme-changed", themeName);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 외부 URL 을 기본 브라우저로 연다. (개발 도구 설치 링크 등)
-    //=========================================================================================
-    openExternal: function (externalUrl)
-    {
-        const resultPromise = ipcRenderer.invoke("shell:open-external", externalUrl);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 규칙(지침) 목록 조회 / 저장 / 삭제
-    //=========================================================================================
-    listRules: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("rules:list", projectDirectoryPath);
-        return resultPromise;
-    },
-    saveRule: function (projectDirectoryPath, ruleItem)
-    {
-        const resultPromise = ipcRenderer.invoke("rules:save", projectDirectoryPath, ruleItem);
-        return resultPromise;
-    },
-    deleteRule: function (projectDirectoryPath, ruleId)
-    {
-        const resultPromise = ipcRenderer.invoke("rules:delete", projectDirectoryPath, ruleId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 작업 목록 조회 / 저장 / 삭제
-    //=========================================================================================
-    listTasks: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("tasks:list", projectDirectoryPath);
-        return resultPromise;
-    },
-    saveTask: function (projectDirectoryPath, taskItem)
-    {
-        const resultPromise = ipcRenderer.invoke("tasks:save", projectDirectoryPath, taskItem);
-        return resultPromise;
-    },
-    deleteTask: function (projectDirectoryPath, taskId)
-    {
-        const resultPromise = ipcRenderer.invoke("tasks:delete", projectDirectoryPath, taskId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 히스토리(에이전트 처리 기록) 조회 / 추가
-    //=========================================================================================
-    listHistory: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("history:list", projectDirectoryPath);
-        return resultPromise;
-    },
-    appendHistory: function (projectDirectoryPath, historyItem)
-    {
-        const resultPromise = ipcRenderer.invoke("history:append", projectDirectoryPath, historyItem);
-        return resultPromise;
-    },
-    deleteHistory: function (projectDirectoryPath, historyId)
-    {
-        const resultPromise = ipcRenderer.invoke("history:delete", projectDirectoryPath, historyId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 파이프라인(노드/엣지 그래프) 목록 조회 / 저장 / 삭제
-    //=========================================================================================
-    listPipelines: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("pipelines:list", projectDirectoryPath);
-        return resultPromise;
-    },
-    savePipeline: function (projectDirectoryPath, pipelineItem)
-    {
-        const resultPromise = ipcRenderer.invoke("pipelines:save", projectDirectoryPath, pipelineItem);
-        return resultPromise;
-    },
-    deletePipeline: function (projectDirectoryPath, pipelineId)
-    {
-        const resultPromise = ipcRenderer.invoke("pipelines:delete", projectDirectoryPath, pipelineId);
-        return resultPromise;
-    },
-
-    //=========================================================================================
-    // 커스텀 액션 목록 조회 / 저장
-    //=========================================================================================
-    listActions: function (projectDirectoryPath)
-    {
-        const resultPromise = ipcRenderer.invoke("actions:list", projectDirectoryPath);
-        return resultPromise;
-    },
-    saveAction: function (projectDirectoryPath, actionItem)
-    {
-        const resultPromise = ipcRenderer.invoke("actions:save", projectDirectoryPath, actionItem);
         return resultPromise;
     }
 };

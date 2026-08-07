@@ -1,20 +1,17 @@
 //=================================================================================================
 // views/settings.js
 // 설정 뷰. ADE 환경설정 목록을 컨텐트 영역에 표시한다. (테마 설정, 언어 설정)
-// 사이드바 네비게이션에는 없고, 파일 > 환경설정 메뉴로 진입한다.
+// 에이전트 목록에는 없고, 파일 > 환경설정 메뉴로 진입한다.
 //=================================================================================================
 
 const System = globalThis;
 
 import { t, getLocale, setLocale, SUPPORTED_LOCALES } from "../locale.js";
 import { getStoredTheme, setTheme } from "../themeManager.js";
-import { getAutoInstallDevTools, setAutoInstallDevTools } from "../preferences.js";
-import { logApp } from "../historyLog.js";
 
 const settingsViewState =
 {
-    contentElement: null,
-    projectPath: null
+    contentElement: null
 };
 
 //=================================================================================================
@@ -46,48 +43,6 @@ function createSettingsSection(titleText)
     titleElement.textContent = titleText;
     sectionElement.appendChild(titleElement);
 
-    return sectionElement;
-}
-
-//=================================================================================================
-// 필요한 개발 도구 자동 설치 토글을 만든다.
-// 켜짐: 에이전트가 없는 도구를 묻지 않고 자동 설치. 꺼짐: 설치 여부를 먼저 확인.
-//=================================================================================================
-function createAutoInstallSetting()
-{
-    const sectionElement = createSettingsSection(t("settings.autoInstall"));
-
-    const descriptionElement = document.createElement("p");
-    descriptionElement.className = "settings-section-description";
-    descriptionElement.textContent = t("settings.autoInstallDescription");
-    sectionElement.appendChild(descriptionElement);
-
-    const isEnabled = getAutoInstallDevTools();
-
-    const switchElement = document.createElement("button");
-    switchElement.className = "settings-switch";
-    switchElement.setAttribute("type", "button");
-    if (isEnabled === true)
-    {
-        switchElement.classList.add("on");
-    }
-    switchElement.setAttribute("aria-pressed", String(isEnabled));
-
-    const switchHandleElement = document.createElement("span");
-    switchHandleElement.className = "settings-switch-handle";
-    switchElement.appendChild(switchHandleElement);
-
-    switchElement.addEventListener("click", function (switchClickEvent)
-    {
-        const previousValue = getAutoInstallDevTools();
-        const nextValue = previousValue === false;
-        setAutoInstallDevTools(nextValue);
-        const projectPath = settingsViewState.projectPath;
-        logApp(projectPath, t("history.changedAutoInstall"), String(nextValue));
-        loadAndRender();
-    });
-
-    sectionElement.appendChild(switchElement);
     return sectionElement;
 }
 
@@ -128,8 +83,6 @@ function createThemeSetting()
         optionButtonElement.addEventListener("click", function (optionClickEvent)
         {
             setTheme(themeValue);
-            const projectPath = settingsViewState.projectPath;
-            logApp(projectPath, t("history.changedTheme"), themeValue);
             loadAndRender();
         });
         optionsElement.appendChild(optionButtonElement);
@@ -162,12 +115,10 @@ function createLanguageSetting()
         selectElement.appendChild(optionElement);
     }
 
-    selectElement.addEventListener("change", async function (selectChangeEvent)
+    selectElement.addEventListener("change", function (selectChangeEvent)
     {
         const selectedLocale = selectElement.value;
         setLocale(selectedLocale);
-        const projectPath = settingsViewState.projectPath;
-        await logApp(projectPath, t("history.changedLanguage"), selectedLocale);
         const windowReference = window;
         windowReference.location.reload();
     });
@@ -188,17 +139,20 @@ function loadAndRender()
     }
     contentElement.replaceChildren();
 
+    const rootElement = document.createElement("div");
+    rootElement.className = "settings-root";
+
     const headerElement = document.createElement("div");
-    headerElement.className = "dashboard-header";
+    headerElement.className = "view-header";
     const titleElement = document.createElement("h1");
-    titleElement.className = "dashboard-title";
+    titleElement.className = "view-title";
     titleElement.textContent = t("settings.title");
     headerElement.appendChild(titleElement);
     const descriptionElement = document.createElement("p");
-    descriptionElement.className = "dashboard-description";
+    descriptionElement.className = "view-description";
     descriptionElement.textContent = t("settings.description");
     headerElement.appendChild(descriptionElement);
-    contentElement.appendChild(headerElement);
+    rootElement.appendChild(headerElement);
 
     const listElement = document.createElement("div");
     listElement.className = "settings-list";
@@ -211,23 +165,16 @@ function loadAndRender()
     generalGroupElement.appendChild(languageSectionElement);
     listElement.appendChild(generalGroupElement);
 
-    // 개발 도구 그룹: 필요한 개발 도구 자동 설치
-    const devToolsGroupElement = createSettingsGroup(t("settings.groupDevTools"));
-    const autoInstallSectionElement = createAutoInstallSetting();
-    devToolsGroupElement.appendChild(autoInstallSectionElement);
-    listElement.appendChild(devToolsGroupElement);
-
-    contentElement.appendChild(listElement);
+    rootElement.appendChild(listElement);
+    contentElement.appendChild(rootElement);
 }
 
 export const settingsView =
 {
     id: "settings",
-    label: "Settings",
     render: function (contentElement, viewContext)
     {
         settingsViewState.contentElement = contentElement;
-        settingsViewState.projectPath = viewContext.projectPath;
         loadAndRender();
     }
 };

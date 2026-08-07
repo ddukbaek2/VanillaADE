@@ -1,6 +1,6 @@
 //=================================================================================================
 // statusBar.js
-// 하단 상태바. 현재 열린 프로젝트 정보와 애플리케이션 이름을 표시한다.
+// 하단 상태바. 현재 선택된 에이전트 정보와 애플리케이션 이름을 표시한다.
 //=================================================================================================
 
 const System = globalThis;
@@ -9,7 +9,7 @@ import { t } from "./locale.js";
 
 //=================================================================================================
 // 상태바를 다시 그린다.
-// statusContext: { projectPath, projectData }
+// statusContext: { agent }
 //=================================================================================================
 export function renderStatusBar(statusBarElement, statusContext)
 {
@@ -18,16 +18,20 @@ export function renderStatusBar(statusBarElement, statusContext)
     const leftElement = document.createElement("div");
     leftElement.className = "status-bar-left";
 
-    const projectPath = statusContext.projectPath;
-    if (projectPath === null)
+    const agent = statusContext.agent;
+    if (agent === null)
     {
-        leftElement.textContent = t("status.noProject");
+        leftElement.textContent = t("status.noAgent");
     }
     else
     {
-        const projectData = statusContext.projectData;
-        const projectName = projectData.name;
-        leftElement.textContent = projectName + "  —  " + projectPath;
+        const isRunning = agent.running;
+        let statusText = t("agent.statusStopped");
+        if (isRunning === true)
+        {
+            statusText = t("agent.statusRunning");
+        }
+        leftElement.textContent = agent.name + "  —  " + agent.directory + "  ·  " + statusText;
     }
 
     const rightElement = document.createElement("div");
