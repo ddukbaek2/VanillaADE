@@ -8,6 +8,9 @@ const nodePath = require("node:path");
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require("electron");
 const agentManager = require("./agentManager");
 const agentStore = require("./agentStore");
+const envFile = require("./envFile");
+
+const GOOGLE_API_KEY_NAME = "GOOGLE_API_KEY";
 
 let mainWindow = null;
 let tray = null;
@@ -190,6 +193,18 @@ function registerIpcHandlers()
         agentManager.stopAgent(agentId);
         const removeResult = await agentStore.removeAgent(agentDirectoryPath);
         return removeResult;
+    });
+
+    ipcMain.handle("agent:get-google-api-key", async function (ipcEvent, agentDirectoryPath)
+    {
+        const apiKey = await envFile.readValue(agentDirectoryPath, GOOGLE_API_KEY_NAME);
+        return apiKey;
+    });
+
+    ipcMain.handle("agent:set-google-api-key", async function (ipcEvent, agentDirectoryPath, apiKey)
+    {
+        const writeResult = await envFile.writeValue(agentDirectoryPath, GOOGLE_API_KEY_NAME, apiKey);
+        return writeResult;
     });
 
     ipcMain.handle("agent:start", async function (ipcEvent, agentId, agentDirectoryPath, agentKind)

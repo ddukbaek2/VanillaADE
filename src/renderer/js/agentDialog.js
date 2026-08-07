@@ -37,9 +37,9 @@ export function getAgentKindLabel(agentKind)
 }
 
 //=================================================================================================
-// 라벨과 입력 컨트롤을 묶은 폼 필드를 만든다.
+// 라벨과 입력 컨트롤을 묶은 폼 필드를 만든다. hintText 가 있으면 컨트롤 아래에 설명을 붙인다.
 //=================================================================================================
-function createFormField(labelText, controlElement)
+function createFormField(labelText, controlElement, hintText)
 {
     const fieldElement = document.createElement("div");
     fieldElement.className = "form-field";
@@ -50,6 +50,15 @@ function createFormField(labelText, controlElement)
     fieldElement.appendChild(labelElement);
 
     fieldElement.appendChild(controlElement);
+
+    if (hintText !== undefined)
+    {
+        const hintElement = document.createElement("span");
+        hintElement.className = "form-field-hint";
+        hintElement.textContent = hintText;
+        fieldElement.appendChild(hintElement);
+    }
+
     return fieldElement;
 }
 
@@ -67,11 +76,17 @@ export function openAgentDialog(dialogOptions)
     let selectedDirectory = "";
     let initialName = "";
     let initialKind = AGENT_KINDS[0].id;
+    let initialGoogleApiKey = "";
     if (targetAgent !== null && targetAgent !== undefined)
     {
         selectedDirectory = targetAgent.directory;
         initialName = targetAgent.name;
         initialKind = targetAgent.kind;
+        const targetGoogleApiKey = targetAgent.googleApiKey;
+        if (targetGoogleApiKey !== undefined && targetGoogleApiKey !== null)
+        {
+            initialGoogleApiKey = targetGoogleApiKey;
+        }
     }
 
     const overlayElement = document.createElement("div");
@@ -95,7 +110,34 @@ export function openAgentDialog(dialogOptions)
     const bodyElement = document.createElement("div");
     bodyElement.className = "modal-body";
 
-    // 폴더 선택 (추가 모드에서만 변경 가능)
+    // 이름 (비우면 폴더 이름을 사용)
+    const nameInputElement = document.createElement("input");
+    nameInputElement.className = "text-input";
+    nameInputElement.type = "text";
+    nameInputElement.placeholder = t("agent.namePlaceholder");
+    nameInputElement.value = initialName;
+    const nameFieldElement = createFormField(t("agent.name"), nameInputElement);
+    bodyElement.appendChild(nameFieldElement);
+
+    // 에이전트 종류 (콤보박스)
+    const kindSelectElement = document.createElement("select");
+    kindSelectElement.className = "select-input";
+    for (const kindDefinition of AGENT_KINDS)
+    {
+        const optionElement = document.createElement("option");
+        optionElement.value = kindDefinition.id;
+        const labelKey = kindDefinition.labelKey;
+        optionElement.textContent = t(labelKey);
+        if (kindDefinition.id === initialKind)
+        {
+            optionElement.selected = true;
+        }
+        kindSelectElement.appendChild(optionElement);
+    }
+    const kindFieldElement = createFormField(t("agent.kind"), kindSelectElement);
+    bodyElement.appendChild(kindFieldElement);
+
+    // 프로젝트 디렉토리 (추가 모드에서만 변경 가능)
     const directoryRowElement = document.createElement("div");
     directoryRowElement.className = "form-field-row";
 
@@ -129,32 +171,15 @@ export function openAgentDialog(dialogOptions)
     const directoryFieldElement = createFormField(t("agent.directory"), directoryRowElement);
     bodyElement.appendChild(directoryFieldElement);
 
-    // 에이전트 종류 (콤보박스)
-    const kindSelectElement = document.createElement("select");
-    kindSelectElement.className = "select-input";
-    for (const kindDefinition of AGENT_KINDS)
-    {
-        const optionElement = document.createElement("option");
-        optionElement.value = kindDefinition.id;
-        const labelKey = kindDefinition.labelKey;
-        optionElement.textContent = t(labelKey);
-        if (kindDefinition.id === initialKind)
-        {
-            optionElement.selected = true;
-        }
-        kindSelectElement.appendChild(optionElement);
-    }
-    const kindFieldElement = createFormField(t("agent.kind"), kindSelectElement);
-    bodyElement.appendChild(kindFieldElement);
-
-    // 이름 (비우면 폴더 이름을 사용)
-    const nameInputElement = document.createElement("input");
-    nameInputElement.className = "text-input";
-    nameInputElement.type = "text";
-    nameInputElement.placeholder = t("agent.namePlaceholder");
-    nameInputElement.value = initialName;
-    const nameFieldElement = createFormField(t("agent.name"), nameInputElement);
-    bodyElement.appendChild(nameFieldElement);
+    // 구글 API 키 (프로젝트 디렉토리의 .env 에 저장된다)
+    const googleApiKeyInputElement = document.createElement("input");
+    googleApiKeyInputElement.className = "text-input";
+    googleApiKeyInputElement.type = "password";
+    googleApiKeyInputElement.placeholder = t("agent.googleApiKeyPlaceholder");
+    googleApiKeyInputElement.value = initialGoogleApiKey;
+    const googleApiKeyHint = t("agent.googleApiKeyHint");
+    const googleApiKeyFieldElement = createFormField(t("agent.googleApiKey"), googleApiKeyInputElement, googleApiKeyHint);
+    bodyElement.appendChild(googleApiKeyFieldElement);
 
     const errorElement = document.createElement("p");
     errorElement.className = "modal-error";
@@ -204,7 +229,8 @@ export function openAgentDialog(dialogOptions)
         {
             directory: selectedDirectory,
             name: nameInputElement.value.trim(),
-            kind: kindSelectElement.value
+            kind: kindSelectElement.value,
+            googleApiKey: googleApiKeyInputElement.value.trim()
         };
         confirmButtonElement.disabled = true;
         const submitResult = await onSubmit(formValues);

@@ -248,6 +248,17 @@ function openAddAgentDialog()
         agent: null,
         onSubmit: async function (formValues)
         {
+            const apiKeyResult = await vanilla.setGoogleApiKey(formValues.directory, formValues.googleApiKey);
+            if (apiKeyResult.ok === false)
+            {
+                const apiKeyFailedResult =
+                {
+                    ok: false,
+                    message: t("agent.googleApiKeyFailed", [apiKeyResult.message])
+                };
+                return apiKeyFailedResult;
+            }
+
             const addResult = await vanilla.addAgent(formValues.directory, formValues.name, formValues.kind);
             if (addResult.ok === false)
             {
@@ -285,16 +296,37 @@ function openAddAgentDialog()
 }
 
 //=================================================================================================
-// 에이전트 설정 팝업을 연다. (이름 / 종류 변경)
+// 에이전트 설정 팝업을 연다. (이름 / 종류 / 구글 API 키 변경)
 //=================================================================================================
-function openAgentSettingsDialog(agent)
+async function openAgentSettingsDialog(agent)
 {
+    const storedApiKey = await vanilla.getGoogleApiKey(agent.directory);
+    const dialogAgent =
+    {
+        id: agent.id,
+        name: agent.name,
+        kind: agent.kind,
+        directory: agent.directory,
+        googleApiKey: storedApiKey
+    };
+
     const dialogOptions =
     {
         mode: "edit",
-        agent: agent,
+        agent: dialogAgent,
         onSubmit: async function (formValues)
         {
+            const apiKeyResult = await vanilla.setGoogleApiKey(formValues.directory, formValues.googleApiKey);
+            if (apiKeyResult.ok === false)
+            {
+                const apiKeyFailedResult =
+                {
+                    ok: false,
+                    message: t("agent.googleApiKeyFailed", [apiKeyResult.message])
+                };
+                return apiKeyFailedResult;
+            }
+
             const updateResult = await vanilla.updateAgent(formValues.directory, formValues.name, formValues.kind);
             if (updateResult.ok === false)
             {

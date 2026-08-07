@@ -81,6 +81,24 @@ const vanillaApi =
     },
 
     //=========================================================================================
+    // 프로젝트 디렉토리의 .env 에서 구글 API 키를 읽는다. (없으면 빈 문자열)
+    //=========================================================================================
+    getGoogleApiKey: function (agentDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:get-google-api-key", agentDirectoryPath);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 프로젝트 디렉토리의 .env 에 구글 API 키를 기록한다. (빈 값이면 항목을 제거)
+    //=========================================================================================
+    setGoogleApiKey: function (agentDirectoryPath, apiKey)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:set-google-api-key", agentDirectoryPath, apiKey);
+        return resultPromise;
+    },
+
+    //=========================================================================================
     // 에이전트 세션을 시작한다.
     //=========================================================================================
     startAgent: function (agentId, agentDirectoryPath, agentKind)
