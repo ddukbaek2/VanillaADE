@@ -110,6 +110,28 @@ export function openAgentDialog(dialogOptions)
     const bodyElement = document.createElement("div");
     bodyElement.className = "modal-body";
 
+    // 소스 선택 탭. 새로 만들거나 여는 방식과 저장소를 클론하는 방식 중 하나를 고른다.
+    let sourceMode = "open";
+    let openTabButtonElement = null;
+    let cloneTabButtonElement = null;
+    if (dialogMode !== "edit")
+    {
+        const tabsElement = document.createElement("div");
+        tabsElement.className = "modal-tabs";
+
+        openTabButtonElement = document.createElement("button");
+        openTabButtonElement.className = "modal-tab active";
+        openTabButtonElement.textContent = t("agent.tabOpen");
+        tabsElement.appendChild(openTabButtonElement);
+
+        cloneTabButtonElement = document.createElement("button");
+        cloneTabButtonElement.className = "modal-tab";
+        cloneTabButtonElement.textContent = t("agent.tabClone");
+        tabsElement.appendChild(cloneTabButtonElement);
+
+        dialogElement.appendChild(tabsElement);
+    }
+
     // 이름 (비우면 폴더 이름을 사용)
     const nameInputElement = document.createElement("input");
     nameInputElement.className = "text-input";
@@ -171,6 +193,85 @@ export function openAgentDialog(dialogOptions)
     const directoryFieldElement = createFormField(t("agent.directory"), directoryRowElement);
     bodyElement.appendChild(directoryFieldElement);
 
+    // 저장소 클론 (Clone 탭에서만 사용)
+    let selectedParentDirectory = "";
+    const repositoryUrlInputElement = document.createElement("input");
+    repositoryUrlInputElement.className = "text-input";
+    repositoryUrlInputElement.type = "text";
+    repositoryUrlInputElement.placeholder = t("agent.repositoryUrlPlaceholder");
+    const repositoryUrlFieldElement = createFormField(t("agent.repositoryUrl"), repositoryUrlInputElement);
+    repositoryUrlFieldElement.style.display = "none";
+    bodyElement.appendChild(repositoryUrlFieldElement);
+
+    const parentDirectoryRowElement = document.createElement("div");
+    parentDirectoryRowElement.className = "form-field-row";
+
+    const parentDirectoryInputElement = document.createElement("input");
+    parentDirectoryInputElement.className = "text-input";
+    parentDirectoryInputElement.type = "text";
+    parentDirectoryInputElement.readOnly = true;
+    parentDirectoryInputElement.placeholder = t("agent.cloneParentPlaceholder");
+    parentDirectoryRowElement.appendChild(parentDirectoryInputElement);
+
+    const selectParentButtonElement = document.createElement("button");
+    selectParentButtonElement.className = "secondary-button";
+    selectParentButtonElement.textContent = t("agent.selectDirectory");
+    selectParentButtonElement.addEventListener("click", async function (selectParentClickEvent)
+    {
+        const vanilla = window.vanilla;
+        const pickedDirectory = await vanilla.selectDirectory();
+        if (pickedDirectory === null)
+        {
+            return;
+        }
+        selectedParentDirectory = pickedDirectory;
+        parentDirectoryInputElement.value = pickedDirectory;
+    });
+    parentDirectoryRowElement.appendChild(selectParentButtonElement);
+
+    const cloneParentHint = t("agent.cloneParentHint");
+    const parentDirectoryFieldElement = createFormField(t("agent.cloneParent"), parentDirectoryRowElement, cloneParentHint);
+    parentDirectoryFieldElement.style.display = "none";
+    bodyElement.appendChild(parentDirectoryFieldElement);
+
+    //=========================================================================================
+    // 선택한 탭에 맞춰 소스 입력 필드를 전환한다.
+    //=========================================================================================
+    function selectSourceMode(nextSourceMode)
+    {
+        sourceMode = nextSourceMode;
+        const isClone = nextSourceMode === "clone";
+        if (isClone === true)
+        {
+            directoryFieldElement.style.display = "none";
+            repositoryUrlFieldElement.style.display = "";
+            parentDirectoryFieldElement.style.display = "";
+            openTabButtonElement.classList.remove("active");
+            cloneTabButtonElement.classList.add("active");
+            repositoryUrlInputElement.focus();
+        }
+        else
+        {
+            directoryFieldElement.style.display = "";
+            repositoryUrlFieldElement.style.display = "none";
+            parentDirectoryFieldElement.style.display = "none";
+            cloneTabButtonElement.classList.remove("active");
+            openTabButtonElement.classList.add("active");
+        }
+    }
+
+    if (dialogMode !== "edit")
+    {
+        openTabButtonElement.addEventListener("click", function (openTabClickEvent)
+        {
+            selectSourceMode("open");
+        });
+        cloneTabButtonElement.addEventListener("click", function (cloneTabClickEvent)
+        {
+            selectSourceMode("clone");
+        });
+    }
+
     // 구글 API 키 (프로젝트 디렉토리의 .env 에 저장된다)
     const googleApiKeyInputElement = document.createElement("input");
     googleApiKeyInputElement.className = "text-input";
@@ -220,21 +321,51 @@ export function openAgentDialog(dialogOptions)
     confirmButtonElement.textContent = t("common.confirm");
     confirmButtonElement.addEventListener("click", async function (confirmClickEvent)
     {
-        if (selectedDirectory.length === 0)
+        const repositoryUrl = repositoryUrlInputElement.value.trim();
+        const isClone = sourceMode === "clone";
+        if (isClone === true)
         {
-            errorElement.textContent = t("agent.directoryRequired");
-            return;
+            if (repositoryUrl.length === 0)
+            {
+                errorElement.textContent = t("agent.repositoryUrlRequired");
+                return;
+            }
+            if (selectedParentDirectory.length === 0)
+            {
+                errorElement.textContent = t("agent.cloneParentRequired");
+                return;
+            }
         }
+        else
+        {
+            if (selectedDirectory.length === 0)
+            {
+                errorElement.textContent = t("agent.directoryRequired");
+                return;
+            }
+        }
+
         const formValues =
         {
+            sourceMode: sourceMode,
             directory: selectedDirectory,
+            repositoryUrl: repositoryUrl,
+            parentDirectory: selectedParentDirectory,
             name: nameInputElement.value.trim(),
             kind: kindSelectElement.value,
             googleApiKey: googleApiKeyInputElement.value.trim()
         };
+
         confirmButtonElement.disabled = true;
+        if (isClone === true)
+        {
+            errorElement.classList.add("working");
+            errorElement.textContent = t("agent.cloning");
+        }
         const submitResult = await onSubmit(formValues);
         confirmButtonElement.disabled = false;
+        errorElement.classList.remove("working");
+        errorElement.textContent = "";
         if (submitResult.ok === true)
         {
             closeDialog();

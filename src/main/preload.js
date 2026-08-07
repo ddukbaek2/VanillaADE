@@ -4,7 +4,7 @@
 //=================================================================================================
 
 const System = globalThis;
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, clipboard } = require("electron");
 const fileSystem = require("node:fs");
 const nodePath = require("node:path");
 
@@ -41,6 +41,15 @@ const vanillaApi =
     selectDirectory: function ()
     {
         const resultPromise = ipcRenderer.invoke("dialog:select-directory");
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // git 저장소를 상위 폴더 아래로 클론하고 클론된 폴더 경로를 반환한다.
+    //=========================================================================================
+    cloneRepository: function (repositoryUrl, parentDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("git:clone", repositoryUrl, parentDirectoryPath);
         return resultPromise;
     },
 
@@ -117,6 +126,59 @@ const vanillaApi =
     },
 
     //=========================================================================================
+    // 에이전트 세션이 지금까지 출력한 내용을 반환한다. (창을 새로 열 때 이전 대화 재생용)
+    //=========================================================================================
+    getAgentOutput: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:output", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 에이전트를 별도 창으로 분리한다.
+    //=========================================================================================
+    detachAgent: function (agentId, agentName)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:detach", agentId, agentName);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 분리된 에이전트 창을 닫아 메인 창으로 결합한다.
+    //=========================================================================================
+    attachAgent: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("agent:attach", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 현재 분리되어 있는 에이전트 아이디 목록을 반환한다.
+    //=========================================================================================
+    listDetachedAgents: function ()
+    {
+        const resultPromise = ipcRenderer.invoke("agent:list-detached");
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 분리 창 목록 변경을 구독한다. 해제 함수를 반환한다.
+    //=========================================================================================
+    onDetachedChanged: function (callback)
+    {
+        const listener = function (ipcEvent)
+        {
+            callback();
+        };
+        ipcRenderer.on("agent:detached-changed", listener);
+        const unsubscribe = function ()
+        {
+            ipcRenderer.removeListener("agent:detached-changed", listener);
+        };
+        return unsubscribe;
+    },
+
+    //=========================================================================================
     // 에이전트에 입력 데이터를 전달한다.
     //=========================================================================================
     writeToAgent: function (agentId, data)
@@ -164,6 +226,23 @@ const vanillaApi =
             ipcRenderer.removeListener("agent:exit", listener);
         };
         return unsubscribe;
+    },
+
+    //=========================================================================================
+    // 클립보드의 텍스트를 읽는다.
+    //=========================================================================================
+    readClipboardText: function ()
+    {
+        const clipboardText = clipboard.readText();
+        return clipboardText;
+    },
+
+    //=========================================================================================
+    // 클립보드에 텍스트를 기록한다.
+    //=========================================================================================
+    writeClipboardText: function (text)
+    {
+        clipboard.writeText(text);
     },
 
     //=========================================================================================

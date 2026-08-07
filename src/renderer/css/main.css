@@ -668,6 +668,33 @@ body
     text-align: center;
 }
 
+/* 별도 창으로 분리된 에이전트를 선택했을 때의 안내 */
+.agent-detached-box
+{
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+/*=================================================================================================
+  분리 창 (에이전트 하나만 표시)
+=================================================================================================*/
+#application.detached-mode
+{
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr;
+    grid-template-areas: "content";
+}
+
+#application.detached-mode #menubar,
+#application.detached-mode #agent-panel,
+#application.detached-mode #panel-splitter,
+#application.detached-mode #status-bar
+{
+    display: none;
+}
+
 /*=================================================================================================
   상태 배지 (실행 상태 표시)
 =================================================================================================*/
@@ -849,6 +876,43 @@ body
     min-height: 16px;
     font-size: 12px;
     color: var(--color-danger);
+}
+
+/* 진행 중 안내(클론 등)는 오류가 아니므로 다른 색으로 표시한다. */
+.modal-error.working
+{
+    color: var(--color-text-muted);
+}
+
+.modal-tabs
+{
+    display: flex;
+    gap: 4px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.modal-tab
+{
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--color-text-muted);
+    padding: 8px 14px;
+    font-size: 13px;
+    font-family: var(--font-ui);
+    cursor: pointer;
+}
+
+.modal-tab:hover
+{
+    color: var(--color-text);
+}
+
+.modal-tab.active
+{
+    color: var(--color-text-strong);
+    border-bottom-color: var(--color-accent);
+    font-weight: 600;
 }
 
 .modal-footer

@@ -11,6 +11,9 @@ const DEFAULT_COLUMNS = 80;
 const DEFAULT_ROWS = 24;
 const TERMINAL_NAME = "xterm-256color";
 
+// 새로 열린 창(창 분리 등)에서 이전 대화를 이어 볼 수 있도록 유지하는 출력 버퍼의 최대 길이.
+const MAXIMUM_OUTPUT_LENGTH = 200000;
+
 //=================================================================================================
 // 에이전트 종류별 실행 명령. (현재는 Claude Code 만 지원)
 //=================================================================================================
@@ -121,12 +124,19 @@ function startAgent(agentId, workingDirectory, agentKind)
         id: agentId,
         directory: workingDirectory,
         kind: agentKind,
-        pty: ptyProcess
+        pty: ptyProcess,
+        output: ""
     };
     sessions.set(agentId, session);
 
     ptyProcess.onData(function (data)
     {
+        session.output = session.output + data;
+        const outputLength = session.output.length;
+        if (outputLength > MAXIMUM_OUTPUT_LENGTH)
+        {
+            session.output = session.output.substring(outputLength - MAXIMUM_OUTPUT_LENGTH);
+        }
         if (dataListener !== null)
         {
             dataListener(agentId, data);
@@ -193,6 +203,20 @@ function stopAgent(agentId)
 }
 
 //=================================================================================================
+// 에이전트 세션이 지금까지 출력한 내용을 반환한다. (없으면 빈 문자열)
+// 창을 새로 열 때 이전 대화를 이어서 보여주기 위해 사용한다.
+//=================================================================================================
+function getAgentOutput(agentId)
+{
+    const session = sessions.get(agentId);
+    if (session === undefined)
+    {
+        return "";
+    }
+    return session.output;
+}
+
+//=================================================================================================
 // 해당 에이전트가 실행 중인지 여부를 반환한다.
 //=================================================================================================
 function isAgentRunning(agentId)
@@ -240,6 +264,7 @@ module.exports =
     writeToAgent,
     resizeAgent,
     stopAgent,
+    getAgentOutput,
     isAgentRunning,
     listRunningAgentIds,
     stopAllAgents

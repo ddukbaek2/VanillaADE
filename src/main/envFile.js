@@ -2,6 +2,7 @@
 // envFile.js
 // 프로젝트 디렉토리의 .env 파일에서 환경변수 한 줄을 읽고 쓴다.
 // 기존 주석 / 빈 줄 / 다른 항목은 그대로 보존하고 해당 키가 있는 줄만 교체한다.
+// .env 에는 비밀 값이 들어가므로 .gitignore 제외 등록도 함께 담당한다.
 //=================================================================================================
 
 const System = globalThis;
@@ -9,6 +10,7 @@ const fileSystem = require("node:fs/promises");
 const nodePath = require("node:path");
 
 const ENV_FILE_NAME = ".env";
+const GITIGNORE_FILE_NAME = ".gitignore";
 
 //=================================================================================================
 // 프로젝트 디렉토리의 .env 절대 경로를 반환한다.
@@ -183,8 +185,102 @@ async function writeValue(projectDirectoryPath, environmentKey, environmentValue
     return successResult;
 }
 
+//=================================================================================================
+// .gitignore 의 한 줄이 이미 .env 를 제외하고 있는지 판별한다.
+// 선행 슬래시와 흔한 와일드카드 표기(.env* / *.env)를 모두 이미 제외된 것으로 본다.
+//=================================================================================================
+function isEnvIgnoreLine(line)
+{
+    let trimmedLine = line.trim();
+    if (trimmedLine.length === 0)
+    {
+        return false;
+    }
+    if (trimmedLine.charAt(0) === "#")
+    {
+        return false;
+    }
+    while (trimmedLine.charAt(0) === "/")
+    {
+        trimmedLine = trimmedLine.substring(1);
+    }
+    const isExactEntry = trimmedLine === ENV_FILE_NAME;
+    const isPrefixEntry = trimmedLine === ENV_FILE_NAME + "*";
+    const isSuffixEntry = trimmedLine === "*" + ENV_FILE_NAME;
+    if (isExactEntry === true || isPrefixEntry === true || isSuffixEntry === true)
+    {
+        return true;
+    }
+    return false;
+}
+
+//=================================================================================================
+// 프로젝트 디렉토리의 .gitignore 에 .env 제외 항목을 보장한다.
+// 이미 제외되어 있으면 그대로 두고, 없으면 추가하며, 파일이 없으면 새로 만든다.
+//=================================================================================================
+async function ensureEnvIgnored(projectDirectoryPath)
+{
+    const gitignoreFilePath = nodePath.join(projectDirectoryPath, GITIGNORE_FILE_NAME);
+
+    let fileContent = "";
+    try
+    {
+        fileContent = await fileSystem.readFile(gitignoreFilePath, "utf-8");
+    }
+    catch (readError)
+    {
+        fileContent = "";
+    }
+
+    const lines = fileContent.split("\n");
+    for (const line of lines)
+    {
+        const isIgnored = isEnvIgnoreLine(line);
+        if (isIgnored === true)
+        {
+            const alreadyIgnoredResult =
+            {
+                ok: true
+            };
+            return alreadyIgnoredResult;
+        }
+    }
+
+    let nextContent = fileContent;
+    if (nextContent.length > 0)
+    {
+        const lastCharacter = nextContent.charAt(nextContent.length - 1);
+        if (lastCharacter !== "\n")
+        {
+            nextContent = nextContent + "\n";
+        }
+    }
+    nextContent = nextContent + ENV_FILE_NAME + "\n";
+
+    try
+    {
+        await fileSystem.writeFile(gitignoreFilePath, nextContent, "utf-8");
+    }
+    catch (writeError)
+    {
+        const failedResult =
+        {
+            ok: false,
+            message: writeError.message
+        };
+        return failedResult;
+    }
+
+    const successResult =
+    {
+        ok: true
+    };
+    return successResult;
+}
+
 module.exports =
 {
     readValue,
-    writeValue
+    writeValue,
+    ensureEnvIgnored
 };

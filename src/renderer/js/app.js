@@ -26,7 +26,8 @@ const applicationState =
     agents: [],
     selectedAgentId: null,
     contentMode: "agent",
-    panelCollapsed: false
+    panelCollapsed: false,
+    isDetachedWindow: false
 };
 
 const applicationElement = document.getElementById("application");
@@ -71,6 +72,21 @@ function getSelectedAgent()
 async function reloadAgents()
 {
     const agentList = await vanilla.listAgents();
+    const detachedAgentIds = await vanilla.listDetachedAgents();
+    const isDetachedWindow = applicationState.isDetachedWindow;
+    for (const agent of agentList)
+    {
+        const detachedIndex = detachedAgentIds.indexOf(agent.id);
+        // 분리 창 자신은 그 에이전트를 직접 표시하므로 분리 상태로 취급하지 않는다.
+        if (isDetachedWindow === true)
+        {
+            agent.detached = false;
+        }
+        else
+        {
+            agent.detached = detachedIndex >= 0;
+        }
+    }
     applicationState.agents = agentList;
 
     const selectedAgent = getSelectedAgent();
@@ -116,7 +132,8 @@ function renderContent()
     {
         agent: selectedAgent,
         onStartAgent: startAgentSession,
-        onStopAgent: stopAgentSession
+        onStopAgent: stopAgentSession,
+        onAttachAgent: attachAgent
     };
     agentTerminalView.render(contentElement, viewContext);
 }
@@ -135,10 +152,16 @@ function renderStatus()
 }
 
 //=================================================================================================
-// 패널 / 상태바 / 컨텐트를 모두 다시 그린다.
+// 패널 / 상태바 / 컨텐트를 모두 다시 그린다. (분리 창은 컨텐트만 그린다)
 //=================================================================================================
 function renderAll()
 {
+    const isDetachedWindow = applicationState.isDetachedWindow;
+    if (isDetachedWindow === true)
+    {
+        renderContent();
+        return;
+    }
     renderAgentPanel();
     renderStatus();
     renderContent();
@@ -212,6 +235,37 @@ async function stopAgentSession(agentId)
 }
 
 //=================================================================================================
+// 에이전트를 별도 창으로 분리한다.
+//=================================================================================================
+async function detachAgent(agentId)
+{
+    const agent = getAgentById(agentId);
+    if (agent === null)
+    {
+        return;
+    }
+    // 분리 창에서 바로 대화를 이어갈 수 있도록 세션을 먼저 확보한다.
+    const isRunning = agent.running;
+    if (isRunning === false)
+    {
+        await startAgentSession(agentId);
+    }
+    await vanilla.detachAgent(agentId, agent.name);
+    await reloadAgents();
+    renderAll();
+}
+
+//=================================================================================================
+// 분리된 에이전트 창을 닫아 메인 창으로 결합한다.
+//=================================================================================================
+async function attachAgent(agentId)
+{
+    await vanilla.attachAgent(agentId);
+    await reloadAgents();
+    renderAll();
+}
+
+//=================================================================================================
 // 에이전트를 선택한다. 실행 중이 아니면 세션을 시작한다.
 //=================================================================================================
 async function selectAgent(agentId)
@@ -221,6 +275,14 @@ async function selectAgent(agentId)
 
     const agent = getAgentById(agentId);
     if (agent === null)
+    {
+        renderAll();
+        return;
+    }
+
+    // 분리된 에이전트는 별도 창에서 다루므로 여기서는 세션을 건드리지 않는다.
+    const isDetached = agent.detached;
+    if (isDetached === true)
     {
         renderAll();
         return;
@@ -238,7 +300,45 @@ async function selectAgent(agentId)
 }
 
 //=================================================================================================
-// 에이전트 추가 팝업을 연다.
+// .gitignore 에 .env 를 추가하지 못한 경우 사용자에게 알린다.
+//=================================================================================================
+function notifyGitignoreFailure(operationResult)
+{
+    const isFailed = operationResult.gitignoreFailed;
+    if (isFailed !== true)
+    {
+        return;
+    }
+    showToast(t("agent.gitignoreFailed"));
+}
+
+//=================================================================================================
+// 클론 실패 사유를 사용자에게 보여줄 메시지로 바꾼다.
+//=================================================================================================
+function getCloneFailureMessage(cloneResult)
+{
+    const failureReason = cloneResult.reason;
+    if (failureReason === "exists")
+    {
+        const existsMessage = t("agent.cloneExists", [cloneResult.directory]);
+        return existsMessage;
+    }
+    if (failureReason === "git-missing")
+    {
+        const gitMissingMessage = t("agent.gitMissing");
+        return gitMissingMessage;
+    }
+    if (failureReason === "invalid-url")
+    {
+        const invalidUrlMessage = t("agent.repositoryUrlRequired");
+        return invalidUrlMessage;
+    }
+    const failedMessage = t("agent.cloneFailed", [cloneResult.message]);
+    return failedMessage;
+}
+
+//=================================================================================================
+// 에이전트 추가 팝업을 연다. (새로 만들기·열기 또는 저장소 클론)
 //=================================================================================================
 function openAddAgentDialog()
 {
@@ -248,7 +348,24 @@ function openAddAgentDialog()
         agent: null,
         onSubmit: async function (formValues)
         {
-            const apiKeyResult = await vanilla.setGoogleApiKey(formValues.directory, formValues.googleApiKey);
+            let agentDirectory = formValues.directory;
+            const isClone = formValues.sourceMode === "clone";
+            if (isClone === true)
+            {
+                const cloneResult = await vanilla.cloneRepository(formValues.repositoryUrl, formValues.parentDirectory);
+                if (cloneResult.ok === false)
+                {
+                    const cloneFailedResult =
+                    {
+                        ok: false,
+                        message: getCloneFailureMessage(cloneResult)
+                    };
+                    return cloneFailedResult;
+                }
+                agentDirectory = cloneResult.directory;
+            }
+
+            const apiKeyResult = await vanilla.setGoogleApiKey(agentDirectory, formValues.googleApiKey);
             if (apiKeyResult.ok === false)
             {
                 const apiKeyFailedResult =
@@ -259,7 +376,7 @@ function openAddAgentDialog()
                 return apiKeyFailedResult;
             }
 
-            const addResult = await vanilla.addAgent(formValues.directory, formValues.name, formValues.kind);
+            const addResult = await vanilla.addAgent(agentDirectory, formValues.name, formValues.kind);
             if (addResult.ok === false)
             {
                 const failureReason = addResult.reason;
@@ -279,6 +396,8 @@ function openAddAgentDialog()
                 };
                 return failedResult;
             }
+
+            notifyGitignoreFailure(addResult);
 
             await reloadAgents();
             const addedAgent = addResult.agent;
@@ -326,6 +445,7 @@ async function openAgentSettingsDialog(agent)
                 };
                 return apiKeyFailedResult;
             }
+            notifyGitignoreFailure(apiKeyResult);
 
             const updateResult = await vanilla.updateAgent(formValues.directory, formValues.name, formValues.kind);
             if (updateResult.ok === false)
@@ -416,6 +536,32 @@ function openAgentMenu(agent, anchorElement, clientX, clientY)
             }
         };
         menuItems.push(startItem);
+    }
+
+    const isDetached = agent.detached;
+    if (isDetached === true)
+    {
+        const attachItem =
+        {
+            label: t("agent.attach"),
+            action: function ()
+            {
+                attachAgent(agentId);
+            }
+        };
+        menuItems.push(attachItem);
+    }
+    else
+    {
+        const detachItem =
+        {
+            label: t("agent.detach"),
+            action: function ()
+            {
+                detachAgent(agentId);
+            }
+        };
+        menuItems.push(detachItem);
     }
 
     const settingsItem =
@@ -566,9 +712,79 @@ function handleAgentExit(payload)
 {
     reloadAgents().then(function ()
     {
+        const isDetachedWindow = applicationState.isDetachedWindow;
+        if (isDetachedWindow === true)
+        {
+            renderContent();
+            return;
+        }
         renderAgentPanel();
         renderStatus();
     });
+}
+
+//=================================================================================================
+// 분리 창이 열리거나 닫히면 목록과 화면을 갱신한다.
+//=================================================================================================
+function handleDetachedChanged()
+{
+    reloadAgents().then(function ()
+    {
+        renderAll();
+    });
+}
+
+//=================================================================================================
+// URL 해시(#agent=<id>)에서 분리 창으로 열린 에이전트 아이디를 읽는다. (없으면 null)
+//=================================================================================================
+function getDetachedAgentId()
+{
+    const hashText = window.location.hash;
+    const prefix = "#agent=";
+    if (hashText.indexOf(prefix) !== 0)
+    {
+        return null;
+    }
+    const agentId = hashText.substring(prefix.length);
+    if (agentId.length === 0)
+    {
+        return null;
+    }
+    return agentId;
+}
+
+//=================================================================================================
+// 분리 창을 초기화한다. 셸(메뉴바/목록/상태바) 없이 지정한 에이전트의 대화 화면만 표시한다.
+//=================================================================================================
+async function initializeDetachedWindow(agentId)
+{
+    applicationState.isDetachedWindow = true;
+    applicationState.selectedAgentId = agentId;
+    applicationElement.classList.add("detached-mode");
+
+    initializeTheme();
+    initializeTerminalStore();
+    vanilla.onAgentExit(handleAgentExit);
+
+    window.addEventListener("resize", function (resizeEvent)
+    {
+        fitSelectedTerminal();
+    });
+
+    await reloadAgents();
+
+    const agent = getAgentById(agentId);
+    if (agent !== null)
+    {
+        document.title = agent.name + " — Vanilla ADE";
+        const isRunning = agent.running;
+        if (isRunning === false)
+        {
+            await startAgentSession(agentId);
+            return;
+        }
+    }
+    renderAll();
 }
 
 //=================================================================================================
@@ -579,6 +795,7 @@ async function initializeApplication()
     initializeTheme();
     initializeTerminalStore();
     vanilla.onAgentExit(handleAgentExit);
+    vanilla.onDetachedChanged(handleDetachedChanged);
 
     const platform = vanilla.platform;
     if (platform === "darwin")
@@ -598,4 +815,12 @@ async function initializeApplication()
     renderAll();
 }
 
-initializeApplication();
+const detachedAgentId = getDetachedAgentId();
+if (detachedAgentId === null)
+{
+    initializeApplication();
+}
+else
+{
+    initializeDetachedWindow(detachedAgentId);
+}

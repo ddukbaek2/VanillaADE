@@ -9,12 +9,16 @@ const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } = require
 const agentManager = require("./agentManager");
 const agentStore = require("./agentStore");
 const envFile = require("./envFile");
+const gitClone = require("./gitClone");
 
 const GOOGLE_API_KEY_NAME = "GOOGLE_API_KEY";
 
 let mainWindow = null;
 let tray = null;
 let isQuitting = false;
+
+// 별도 창으로 분리된 에이전트. (agentId → BrowserWindow)
+const agentWindows = new System.Map();
 
 // GPU 가속이 불필요하고, 가상화/원격 환경에서 GPU 초기화 실패로 렌더러가 죽는 것을 방지한다.
 app.disableHardwareAcceleration();
@@ -104,6 +108,111 @@ function showMainWindow()
 }
 
 //=================================================================================================
+// 메인 창에 분리 창 목록이 바뀌었음을 알린다.
+//=================================================================================================
+function notifyDetachedChanged()
+{
+    if (mainWindow === null)
+    {
+        return;
+    }
+    const isDestroyed = mainWindow.isDestroyed();
+    if (isDestroyed === true)
+    {
+        return;
+    }
+    mainWindow.webContents.send("agent:detached-changed");
+}
+
+//=================================================================================================
+// 에이전트를 별도 창으로 분리한다. (이미 분리되어 있으면 그 창을 포커스)
+//=================================================================================================
+function openAgentWindow(agentId, agentName)
+{
+    const existingWindow = agentWindows.get(agentId);
+    if (existingWindow !== undefined && existingWindow.isDestroyed() === false)
+    {
+        existingWindow.focus();
+        return;
+    }
+
+    const preloadPath = nodePath.join(__dirname, "preload.js");
+    const iconPath = nodePath.join(__dirname, "..", "..", "assets", "icon-dark.png");
+    const windowOptions =
+    {
+        width: 1100,
+        height: 820,
+        minWidth: 520,
+        minHeight: 420,
+        backgroundColor: "#2a2620",
+        icon: iconPath,
+        title: agentName,
+        webPreferences:
+        {
+            preload: preloadPath,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: false
+        }
+    };
+    const agentWindow = new BrowserWindow(windowOptions);
+    agentWindow.setMenuBarVisibility(false);
+
+    const indexHtmlPath = nodePath.join(__dirname, "..", "renderer", "index.html");
+    const loadOptions =
+    {
+        hash: "agent=" + agentId
+    };
+    agentWindow.loadFile(indexHtmlPath, loadOptions);
+
+    agentWindows.set(agentId, agentWindow);
+    agentWindow.on("closed", function ()
+    {
+        agentWindows.delete(agentId);
+        notifyDetachedChanged();
+    });
+    notifyDetachedChanged();
+}
+
+//=================================================================================================
+// 분리된 에이전트 창을 닫아 메인 창으로 결합한다.
+//=================================================================================================
+function closeAgentWindow(agentId)
+{
+    const agentWindow = agentWindows.get(agentId);
+    if (agentWindow === undefined)
+    {
+        return false;
+    }
+    agentWindows.delete(agentId);
+    const isDestroyed = agentWindow.isDestroyed();
+    if (isDestroyed === false)
+    {
+        agentWindow.close();
+    }
+    notifyDetachedChanged();
+    return true;
+}
+
+//=================================================================================================
+// 현재 분리되어 있는 에이전트 아이디 목록을 반환한다.
+//=================================================================================================
+function listDetachedAgentIds()
+{
+    const detachedAgentIds = [];
+    for (const entry of agentWindows.entries())
+    {
+        const agentId = entry[0];
+        const agentWindow = entry[1];
+        if (agentWindow.isDestroyed() === false)
+        {
+            detachedAgentIds.push(agentId);
+        }
+    }
+    return detachedAgentIds;
+}
+
+//=================================================================================================
 // 시스템 트레이를 생성한다.
 //=================================================================================================
 function createTray()
@@ -164,6 +273,12 @@ function registerIpcHandlers()
         return selectedPath;
     });
 
+    ipcMain.handle("git:clone", async function (ipcEvent, repositoryUrl, parentDirectoryPath)
+    {
+        const cloneResult = await gitClone.cloneRepository(repositoryUrl, parentDirectoryPath);
+        return cloneResult;
+    });
+
     ipcMain.handle("agent:list", async function ()
     {
         const agentList = await agentStore.listAgents();
@@ -179,6 +294,16 @@ function registerIpcHandlers()
     ipcMain.handle("agent:add", async function (ipcEvent, agentDirectoryPath, agentName, agentKind)
     {
         const addResult = await agentStore.addAgent(agentDirectoryPath, agentName, agentKind);
+        if (addResult.ok === false)
+        {
+            return addResult;
+        }
+        // .env 에는 비밀 값이 들어가므로 등록과 동시에 반드시 .gitignore 로 제외한다.
+        const ignoreResult = await envFile.ensureEnvIgnored(agentDirectoryPath);
+        if (ignoreResult.ok === false)
+        {
+            addResult.gitignoreFailed = true;
+        }
         return addResult;
     });
 
@@ -190,6 +315,7 @@ function registerIpcHandlers()
 
     ipcMain.handle("agent:remove", async function (ipcEvent, agentId, agentDirectoryPath)
     {
+        closeAgentWindow(agentId);
         agentManager.stopAgent(agentId);
         const removeResult = await agentStore.removeAgent(agentDirectoryPath);
         return removeResult;
@@ -203,7 +329,12 @@ function registerIpcHandlers()
 
     ipcMain.handle("agent:set-google-api-key", async function (ipcEvent, agentDirectoryPath, apiKey)
     {
+        const ignoreResult = await envFile.ensureEnvIgnored(agentDirectoryPath);
         const writeResult = await envFile.writeValue(agentDirectoryPath, GOOGLE_API_KEY_NAME, apiKey);
+        if (writeResult.ok === true && ignoreResult.ok === false)
+        {
+            writeResult.gitignoreFailed = true;
+        }
         return writeResult;
     });
 
@@ -217,6 +348,30 @@ function registerIpcHandlers()
     {
         const stopResult = agentManager.stopAgent(agentId);
         return stopResult;
+    });
+
+    ipcMain.handle("agent:output", async function (ipcEvent, agentId)
+    {
+        const agentOutput = agentManager.getAgentOutput(agentId);
+        return agentOutput;
+    });
+
+    ipcMain.handle("agent:detach", async function (ipcEvent, agentId, agentName)
+    {
+        openAgentWindow(agentId, agentName);
+        return true;
+    });
+
+    ipcMain.handle("agent:attach", async function (ipcEvent, agentId)
+    {
+        const closeResult = closeAgentWindow(agentId);
+        return closeResult;
+    });
+
+    ipcMain.handle("agent:list-detached", async function ()
+    {
+        const detachedAgentIds = listDetachedAgentIds();
+        return detachedAgentIds;
     });
 
     ipcMain.on("agent:write", function (ipcEvent, agentId, data)
@@ -289,46 +444,46 @@ function registerIpcHandlers()
 }
 
 //=================================================================================================
+// 메인 창과 모든 분리 창에 에이전트 이벤트를 전달한다.
+//=================================================================================================
+function broadcastToWindows(channelName, payload)
+{
+    if (mainWindow !== null && mainWindow.isDestroyed() === false)
+    {
+        mainWindow.webContents.send(channelName, payload);
+    }
+    for (const agentWindow of agentWindows.values())
+    {
+        if (agentWindow.isDestroyed() === false)
+        {
+            agentWindow.webContents.send(channelName, payload);
+        }
+    }
+}
+
+//=================================================================================================
 // 에이전트 pty 출력/종료 이벤트를 렌더러로 전달하도록 리스너를 등록한다.
 //=================================================================================================
 function registerAgentForwarders()
 {
     agentManager.setDataListener(function (agentId, data)
     {
-        if (mainWindow === null)
-        {
-            return;
-        }
-        const isDestroyed = mainWindow.isDestroyed();
-        if (isDestroyed === true)
-        {
-            return;
-        }
         const payload =
         {
             id: agentId,
             data: data
         };
-        mainWindow.webContents.send("agent:data", payload);
+        broadcastToWindows("agent:data", payload);
     });
 
     agentManager.setExitListener(function (agentId, exitInfo)
     {
-        if (mainWindow === null)
-        {
-            return;
-        }
-        const isDestroyed = mainWindow.isDestroyed();
-        if (isDestroyed === true)
-        {
-            return;
-        }
         const payload =
         {
             id: agentId,
             exitCode: exitInfo.exitCode
         };
-        mainWindow.webContents.send("agent:exit", payload);
+        broadcastToWindows("agent:exit", payload);
     });
 }
 

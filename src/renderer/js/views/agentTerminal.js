@@ -27,6 +27,37 @@ function createEmptyView()
 }
 
 //=================================================================================================
+// 에이전트가 별도 창으로 분리되어 있을 때의 안내 화면을 만든다.
+//=================================================================================================
+function createDetachedView(agent, viewContext)
+{
+    const detachedElement = document.createElement("div");
+    detachedElement.className = "agent-terminal-empty";
+
+    const boxElement = document.createElement("div");
+    boxElement.className = "agent-detached-box";
+
+    const messageElement = document.createElement("p");
+    messageElement.className = "agent-terminal-empty-message";
+    messageElement.textContent = t("agent.detachedMessage", [agent.name]);
+    boxElement.appendChild(messageElement);
+
+    const attachButtonElement = document.createElement("button");
+    attachButtonElement.className = "primary-button";
+    attachButtonElement.textContent = t("agent.attach");
+    const agentId = agent.id;
+    const onAttachAgent = viewContext.onAttachAgent;
+    attachButtonElement.addEventListener("click", function (attachClickEvent)
+    {
+        onAttachAgent(agentId);
+    });
+    boxElement.appendChild(attachButtonElement);
+
+    detachedElement.appendChild(boxElement);
+    return detachedElement;
+}
+
+//=================================================================================================
 // 에이전트 정보와 실행 제어 버튼이 있는 상단 헤더를 만든다.
 //=================================================================================================
 function createHeader(agent, viewContext)
@@ -115,6 +146,14 @@ export const agentTerminalView =
         {
             const emptyElement = createEmptyView();
             contentElement.appendChild(emptyElement);
+            return;
+        }
+
+        const isDetached = agent.detached;
+        if (isDetached === true)
+        {
+            const detachedElement = createDetachedView(agent, viewContext);
+            contentElement.appendChild(detachedElement);
             return;
         }
 
