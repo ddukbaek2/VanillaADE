@@ -10,6 +10,7 @@ import { renderStatusBar } from "./statusBar.js";
 import { openAgentDialog } from "./agentDialog.js";
 import { openContextMenu, openContextMenuAt } from "./contextMenu.js";
 import { agentTerminalView } from "./views/agentTerminal.js";
+import { agentChatView, updateChatView } from "./views/agentChat.js";
 import { settingsView } from "./views/settings.js";
 import { initializeTerminalStore, fitTerminal, disposeTerminal } from "./terminalStore.js";
 import { initializeSplitter } from "./splitter.js";
@@ -28,6 +29,15 @@ const applicationState =
     contentMode: "agent",
     panelCollapsed: false,
     isDetachedWindow: false
+};
+
+// 기본 모드 대화 상태. (선택된 에이전트 기준)
+const chatState =
+{
+    messages: [],
+    isBusy: false,
+    activityLabel: "",
+    streamingText: ""
 };
 
 const applicationElement = document.getElementById("application");
@@ -128,6 +138,23 @@ function renderContent()
     }
 
     const selectedAgent = getSelectedAgent();
+    const isBasicMode = selectedAgent !== null && selectedAgent.mode === "basic" && selectedAgent.detached !== true;
+    if (isBasicMode === true)
+    {
+        const chatContext =
+        {
+            agent: selectedAgent,
+            messages: getDisplayMessages(),
+            isBusy: chatState.isBusy,
+            activityLabel: chatState.activityLabel,
+            onSendMessage: sendChatMessage,
+            onCancelMessage: cancelChatMessage,
+            onClearMessages: clearChatMessages
+        };
+        agentChatView.render(contentElement, chatContext);
+        return;
+    }
+
     const viewContext =
     {
         agent: selectedAgent,
@@ -215,7 +242,7 @@ async function startAgentSession(agentId)
     {
         return;
     }
-    const startResult = await vanilla.startAgent(agentId, agent.directory, agent.kind);
+    const startResult = await vanilla.startAgent(agentId, agent.directory, agent.kind, agent);
     if (startResult.ok === false)
     {
         showToast(t("agent.startFailed"));
@@ -232,6 +259,175 @@ async function stopAgentSession(agentId)
     await vanilla.stopAgent(agentId);
     await reloadAgents();
     renderAll();
+}
+
+//=================================================================================================
+// 화면에 표시할 대화 목록을 만든다. (응답 스트리밍 중이면 진행 중인 답변을 덧붙인다)
+//=================================================================================================
+function getDisplayMessages()
+{
+    const displayMessages = chatState.messages.slice();
+    const streamingText = chatState.streamingText;
+    if (streamingText.length > 0)
+    {
+        const streamingMessage =
+        {
+            role: "assistant",
+            text: streamingText
+        };
+        displayMessages.push(streamingMessage);
+    }
+    return displayMessages;
+}
+
+//=================================================================================================
+// 대화 화면만 다시 그린다. (스트리밍 중 잦은 갱신용)
+//=================================================================================================
+function renderChat()
+{
+    const chatUpdate =
+    {
+        messages: getDisplayMessages(),
+        isBusy: chatState.isBusy,
+        activityLabel: chatState.activityLabel
+    };
+    updateChatView(chatUpdate);
+}
+
+//=================================================================================================
+// 선택된 에이전트의 대화 기록을 다시 읽는다.
+//=================================================================================================
+async function reloadChatMessages(agent)
+{
+    const messages = await vanilla.listChatMessages(agent.directory);
+    chatState.messages = messages;
+    const isBusy = await vanilla.isChatBusy(agent.id);
+    chatState.isBusy = isBusy;
+    chatState.streamingText = "";
+    chatState.activityLabel = "";
+}
+
+//=================================================================================================
+// 기본 모드로 메시지를 보낸다.
+//=================================================================================================
+async function sendChatMessage(userMessage)
+{
+    const agent = getSelectedAgent();
+    if (agent === null)
+    {
+        return;
+    }
+
+    const userChatMessage =
+    {
+        role: "user",
+        text: userMessage
+    };
+    chatState.messages.push(userChatMessage);
+    chatState.isBusy = true;
+    chatState.streamingText = "";
+    chatState.activityLabel = "";
+    renderChat();
+
+    const sendResult = await vanilla.sendChatMessage(agent, userMessage);
+    if (sendResult.ok === false)
+    {
+        chatState.isBusy = false;
+        renderChat();
+        showToast(t("chat.sendFailed"));
+    }
+}
+
+//=================================================================================================
+// 진행 중인 응답을 중단한다.
+//=================================================================================================
+async function cancelChatMessage()
+{
+    const agent = getSelectedAgent();
+    if (agent === null)
+    {
+        return;
+    }
+    await vanilla.cancelChatMessage(agent.id);
+    chatState.isBusy = false;
+    chatState.activityLabel = "";
+    renderChat();
+}
+
+//=================================================================================================
+// 대화 기록과 대화 세션을 비운다.
+//=================================================================================================
+async function clearChatMessages()
+{
+    const agent = getSelectedAgent();
+    if (agent === null)
+    {
+        return;
+    }
+    const isConfirmed = window.confirm(t("chat.confirmClear"));
+    if (isConfirmed === false)
+    {
+        return;
+    }
+    await vanilla.clearChatMessages(agent.directory);
+    chatState.messages = [];
+    chatState.streamingText = "";
+    chatState.activityLabel = "";
+    await reloadAgents();
+    renderAll();
+}
+
+//=================================================================================================
+// 기본 모드 채팅 이벤트를 처리한다.
+//=================================================================================================
+function handleChatEvent(payload)
+{
+    const agent = getSelectedAgent();
+    if (agent === null)
+    {
+        return;
+    }
+    if (payload.id !== agent.id)
+    {
+        return;
+    }
+
+    const chatEvent = payload.event;
+    const eventType = chatEvent.type;
+    if (eventType === "text")
+    {
+        chatState.streamingText = chatState.streamingText + chatEvent.text;
+        chatState.activityLabel = "";
+        renderChat();
+        return;
+    }
+    if (eventType === "tool")
+    {
+        chatState.activityLabel = t("chat.usingTool", [chatEvent.name]);
+        renderChat();
+        return;
+    }
+    if (eventType === "error")
+    {
+        const errorMessage =
+        {
+            role: "assistant",
+            text: t("chat.errorPrefix") + " " + chatEvent.message
+        };
+        chatState.messages.push(errorMessage);
+        chatState.streamingText = "";
+        renderChat();
+        return;
+    }
+    if (eventType === "closed")
+    {
+        chatState.isBusy = false;
+        chatState.activityLabel = "";
+        reloadChatMessages(agent).then(function ()
+        {
+            renderChat();
+        });
+    }
 }
 
 //=================================================================================================
@@ -284,6 +480,15 @@ async function selectAgent(agentId)
     const isDetached = agent.detached;
     if (isDetached === true)
     {
+        renderAll();
+        return;
+    }
+
+    // 기본 모드는 터미널 세션 없이 요청할 때마다 에이전트를 호출한다.
+    const isBasicMode = agent.mode === "basic";
+    if (isBasicMode === true)
+    {
+        await reloadChatMessages(agent);
         renderAll();
         return;
     }
@@ -376,7 +581,7 @@ function openAddAgentDialog()
                 return apiKeyFailedResult;
             }
 
-            const addResult = await vanilla.addAgent(agentDirectory, formValues.name, formValues.kind);
+            const addResult = await vanilla.addAgent(agentDirectory, formValues.name, formValues.kind, formValues.mode, formValues.projectSettings);
             if (addResult.ok === false)
             {
                 const failureReason = addResult.reason;
@@ -447,7 +652,7 @@ async function openAgentSettingsDialog(agent)
             }
             notifyGitignoreFailure(apiKeyResult);
 
-            const updateResult = await vanilla.updateAgent(formValues.directory, formValues.name, formValues.kind);
+            const updateResult = await vanilla.updateAgent(formValues.directory, formValues.name, formValues.kind, formValues.mode, formValues.projectSettings);
             if (updateResult.ok === false)
             {
                 const failedResult =
@@ -458,16 +663,32 @@ async function openAgentSettingsDialog(agent)
                 return failedResult;
             }
 
-            // 종류가 바뀌면 실행 중인 세션은 이전 종류로 돌고 있으므로 종료한다.
-            const previousKind = agent.kind;
-            const isKindChanged = previousKind !== formValues.kind;
+            // 라우 모드는 세션을 시작할 때 설정을 주입하므로, 설정이 바뀌면 세션을 다시 띄워 반영한다.
+            const previousSettings = System.JSON.stringify(agent.projectSettings);
+            const nextSettings = System.JSON.stringify(formValues.projectSettings);
+            const isKindChanged = agent.kind !== formValues.kind;
+            const isModeChanged = agent.mode !== formValues.mode;
+            const isSettingsChanged = previousSettings !== nextSettings;
+            const needsRestart = isKindChanged === true || isModeChanged === true || isSettingsChanged === true;
             const isRunning = agent.running;
-            if (isKindChanged === true && isRunning === true)
+            if (needsRestart === true && isRunning === true)
             {
                 await vanilla.stopAgent(agent.id);
             }
 
             await reloadAgents();
+
+            const isStillRaw = formValues.mode === "raw";
+            const shouldRestart = needsRestart === true && isRunning === true && isStillRaw === true;
+            if (shouldRestart === true)
+            {
+                await startAgentSession(agent.id);
+                const restartedResult =
+                {
+                    ok: true
+                };
+                return restartedResult;
+            }
             renderAll();
 
             const successResult =
@@ -765,6 +986,7 @@ async function initializeDetachedWindow(agentId)
     initializeTheme();
     initializeTerminalStore();
     vanilla.onAgentExit(handleAgentExit);
+    vanilla.onChatEvent(handleChatEvent);
 
     window.addEventListener("resize", function (resizeEvent)
     {
@@ -777,6 +999,13 @@ async function initializeDetachedWindow(agentId)
     if (agent !== null)
     {
         document.title = agent.name + " — Vanilla ADE";
+        const isBasicMode = agent.mode === "basic";
+        if (isBasicMode === true)
+        {
+            await reloadChatMessages(agent);
+            renderAll();
+            return;
+        }
         const isRunning = agent.running;
         if (isRunning === false)
         {
@@ -795,6 +1024,7 @@ async function initializeApplication()
     initializeTheme();
     initializeTerminalStore();
     vanilla.onAgentExit(handleAgentExit);
+    vanilla.onChatEvent(handleChatEvent);
     vanilla.onDetachedChanged(handleDetachedChanged);
 
     const platform = vanilla.platform;

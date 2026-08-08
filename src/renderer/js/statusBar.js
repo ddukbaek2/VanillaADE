@@ -25,11 +25,17 @@ export function renderStatusBar(statusBarElement, statusContext)
     }
     else
     {
-        const isRunning = agent.running;
-        let statusText = t("agent.statusStopped");
-        if (isRunning === true)
+        // 기본 모드는 상주 세션이 없으므로 실행 상태 대신 모드를 표시한다.
+        const isBasicMode = agent.mode === "basic";
+        let statusText = t("agent.modeBasic");
+        if (isBasicMode === false)
         {
-            statusText = t("agent.statusRunning");
+            const isRunning = agent.running;
+            statusText = t("agent.statusStopped");
+            if (isRunning === true)
+            {
+                statusText = t("agent.statusRunning");
+            }
         }
         leftElement.textContent = agent.name + "  —  " + agent.directory + "  ·  " + statusText;
     }

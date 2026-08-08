@@ -13,6 +13,55 @@ const store = require("./store");
 const VANILLA_DIRECTORY_NAME = ".vanilla";
 const AGENT_FILE_NAME = "agent.json";
 const DEFAULT_AGENT_KIND = "claude-code";
+const DEFAULT_AGENT_MODE = "basic";
+
+//=================================================================================================
+// 프로젝트 설정 객체를 형식에 맞게 정리한다. (누락된 항목은 빈 문자열)
+//=================================================================================================
+function normalizeProjectSettings(projectSettings)
+{
+    let sourceSettings = projectSettings;
+    if (sourceSettings === null || sourceSettings === undefined)
+    {
+        sourceSettings = {};
+    }
+
+    let description = sourceSettings.description;
+    if (description === null || description === undefined)
+    {
+        description = "";
+    }
+    let techStack = sourceSettings.techStack;
+    if (techStack === null || techStack === undefined)
+    {
+        techStack = "";
+    }
+    let guidelines = sourceSettings.guidelines;
+    if (guidelines === null || guidelines === undefined)
+    {
+        guidelines = "";
+    }
+
+    const normalizedSettings =
+    {
+        description: description,
+        techStack: techStack,
+        guidelines: guidelines
+    };
+    return normalizedSettings;
+}
+
+//=================================================================================================
+// 모드 값을 정리한다. (아는 값이 아니면 기본 모드)
+//=================================================================================================
+function normalizeMode(agentMode)
+{
+    if (agentMode === "raw")
+    {
+        return "raw";
+    }
+    return DEFAULT_AGENT_MODE;
+}
 
 //=================================================================================================
 // 경로 문자열에서 마지막 폴더 이름을 추출한다.
@@ -121,6 +170,9 @@ async function listAgents()
             id: agentData.id,
             name: agentData.name,
             kind: agentData.kind,
+            mode: normalizeMode(agentData.mode),
+            projectSettings: normalizeProjectSettings(agentData.projectSettings),
+            chatSessionId: agentData.chatSessionId,
             createdAt: agentData.createdAt,
             directory: agentDirectoryPath
         };
@@ -132,7 +184,7 @@ async function listAgents()
 //=================================================================================================
 // 새 에이전트를 등록한다. 이미 등록된 폴더면 duplicate 결과를 반환한다.
 //=================================================================================================
-async function addAgent(agentDirectoryPath, agentName, agentKind)
+async function addAgent(agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
 {
     const agentDirectories = await readAgentDirectories();
     const existingIndex = agentDirectories.indexOf(agentDirectoryPath);
@@ -165,6 +217,9 @@ async function addAgent(agentDirectoryPath, agentName, agentKind)
         id: agentIdentifier,
         name: resolvedName,
         kind: resolvedKind,
+        mode: normalizeMode(agentMode),
+        projectSettings: normalizeProjectSettings(projectSettings),
+        chatSessionId: "",
         createdAt: nowIsoString
     };
 
@@ -191,6 +246,9 @@ async function addAgent(agentDirectoryPath, agentName, agentKind)
         id: agentData.id,
         name: agentData.name,
         kind: agentData.kind,
+        mode: agentData.mode,
+        projectSettings: agentData.projectSettings,
+        chatSessionId: agentData.chatSessionId,
         createdAt: agentData.createdAt,
         directory: agentDirectoryPath
     };
@@ -203,9 +261,10 @@ async function addAgent(agentDirectoryPath, agentName, agentKind)
 }
 
 //=================================================================================================
-// 등록된 에이전트의 이름 / 종류를 갱신한다. (폴더는 저장 위치이므로 변경하지 않는다)
+// 등록된 에이전트의 이름 / 종류 / 모드 / 프로젝트 설정을 갱신한다.
+// (폴더는 저장 위치이므로 변경하지 않는다)
 //=================================================================================================
-async function updateAgent(agentDirectoryPath, agentName, agentKind)
+async function updateAgent(agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
 {
     const agentData = await readAgentFile(agentDirectoryPath);
     if (agentData === null)
@@ -225,6 +284,8 @@ async function updateAgent(agentDirectoryPath, agentName, agentKind)
     }
     agentData.name = resolvedName;
     agentData.kind = agentKind;
+    agentData.mode = normalizeMode(agentMode);
+    agentData.projectSettings = normalizeProjectSettings(projectSettings);
     await writeAgentFile(agentDirectoryPath, agentData);
 
     const agent =
@@ -232,6 +293,9 @@ async function updateAgent(agentDirectoryPath, agentName, agentKind)
         id: agentData.id,
         name: agentData.name,
         kind: agentData.kind,
+        mode: agentData.mode,
+        projectSettings: agentData.projectSettings,
+        chatSessionId: agentData.chatSessionId,
         createdAt: agentData.createdAt,
         directory: agentDirectoryPath
     };
@@ -241,6 +305,21 @@ async function updateAgent(agentDirectoryPath, agentName, agentKind)
         agent: agent
     };
     return successResult;
+}
+
+//=================================================================================================
+// 기본 모드 대화를 이어가기 위한 세션 아이디를 저장한다.
+//=================================================================================================
+async function setChatSessionId(agentDirectoryPath, chatSessionId)
+{
+    const agentData = await readAgentFile(agentDirectoryPath);
+    if (agentData === null)
+    {
+        return false;
+    }
+    agentData.chatSessionId = chatSessionId;
+    await writeAgentFile(agentDirectoryPath, agentData);
+    return true;
 }
 
 //=================================================================================================
@@ -276,5 +355,6 @@ module.exports =
     listAgents,
     addAgent,
     updateAgent,
+    setChatSessionId,
     removeAgent
 };

@@ -62,8 +62,9 @@ function setExitListener(listener)
 
 //=================================================================================================
 // 에이전트 세션을 시작한다. 이미 실행 중이면 그대로 성공으로 반환한다.
+// systemPrompt 가 있으면 세션 시작 시 프로젝트 설정으로 주입한다.
 //=================================================================================================
-function startAgent(agentId, workingDirectory, agentKind)
+function startAgent(agentId, workingDirectory, agentKind, systemPrompt)
 {
     const existingSession = sessions.get(agentId);
     if (existingSession !== undefined)
@@ -92,7 +93,14 @@ function startAgent(agentId, workingDirectory, agentKind)
     {
         shellCommand = commandDefinition.windowsCommand;
     }
-    const commandArguments = commandDefinition.args;
+
+    const commandArguments = commandDefinition.args.slice();
+    const hasSystemPrompt = systemPrompt !== null && systemPrompt !== undefined && systemPrompt.length > 0;
+    if (hasSystemPrompt === true)
+    {
+        commandArguments.push("--append-system-prompt");
+        commandArguments.push(systemPrompt);
+    }
 
     const spawnOptions =
     {

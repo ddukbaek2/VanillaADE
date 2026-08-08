@@ -10,6 +10,9 @@ const agentManager = require("./agentManager");
 const agentStore = require("./agentStore");
 const envFile = require("./envFile");
 const gitClone = require("./gitClone");
+const chatSession = require("./chatSession");
+const chatStore = require("./chatStore");
+const projectPrompt = require("./projectPrompt");
 
 const GOOGLE_API_KEY_NAME = "GOOGLE_API_KEY";
 
@@ -19,6 +22,9 @@ let isQuitting = false;
 
 // 별도 창으로 분리된 에이전트. (agentId → BrowserWindow)
 const agentWindows = new System.Map();
+
+// 채팅 응답을 기록할 위치. (agentId → 프로젝트 디렉토리)
+const chatDirectories = new System.Map();
 
 // GPU 가속이 불필요하고, 가상화/원격 환경에서 GPU 초기화 실패로 렌더러가 죽는 것을 방지한다.
 app.disableHardwareAcceleration();
@@ -291,9 +297,9 @@ function registerIpcHandlers()
         return agentList;
     });
 
-    ipcMain.handle("agent:add", async function (ipcEvent, agentDirectoryPath, agentName, agentKind)
+    ipcMain.handle("agent:add", async function (ipcEvent, agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
     {
-        const addResult = await agentStore.addAgent(agentDirectoryPath, agentName, agentKind);
+        const addResult = await agentStore.addAgent(agentDirectoryPath, agentName, agentKind, agentMode, projectSettings);
         if (addResult.ok === false)
         {
             return addResult;
@@ -307,9 +313,9 @@ function registerIpcHandlers()
         return addResult;
     });
 
-    ipcMain.handle("agent:update", async function (ipcEvent, agentDirectoryPath, agentName, agentKind)
+    ipcMain.handle("agent:update", async function (ipcEvent, agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
     {
-        const updateResult = await agentStore.updateAgent(agentDirectoryPath, agentName, agentKind);
+        const updateResult = await agentStore.updateAgent(agentDirectoryPath, agentName, agentKind, agentMode, projectSettings);
         return updateResult;
     });
 
@@ -317,6 +323,8 @@ function registerIpcHandlers()
     {
         closeAgentWindow(agentId);
         agentManager.stopAgent(agentId);
+        chatSession.cancelMessage(agentId);
+        chatDirectories.delete(agentId);
         const removeResult = await agentStore.removeAgent(agentDirectoryPath);
         return removeResult;
     });
@@ -338,10 +346,63 @@ function registerIpcHandlers()
         return writeResult;
     });
 
-    ipcMain.handle("agent:start", async function (ipcEvent, agentId, agentDirectoryPath, agentKind)
+    ipcMain.handle("agent:start", async function (ipcEvent, agentId, agentDirectoryPath, agentKind, agentInfo)
     {
-        const startResult = agentManager.startAgent(agentId, agentDirectoryPath, agentKind);
+        // 라우 모드는 세션을 띄울 때 프로젝트 설정을 한 번 주입한다.
+        const systemPrompt = projectPrompt.buildSystemPrompt(agentInfo);
+        const startResult = agentManager.startAgent(agentId, agentDirectoryPath, agentKind, systemPrompt);
         return startResult;
+    });
+
+    ipcMain.handle("chat:list", async function (ipcEvent, agentDirectoryPath)
+    {
+        const messages = await chatStore.listMessages(agentDirectoryPath);
+        return messages;
+    });
+
+    ipcMain.handle("chat:clear", async function (ipcEvent, agentDirectoryPath)
+    {
+        await chatStore.clearMessages(agentDirectoryPath);
+        await agentStore.setChatSessionId(agentDirectoryPath, "");
+        return true;
+    });
+
+    ipcMain.handle("chat:send", async function (ipcEvent, agentInfo, userMessage)
+    {
+        const userChatMessage =
+        {
+            role: "user",
+            text: userMessage,
+            at: new System.Date().toISOString()
+        };
+        await chatStore.appendMessage(agentInfo.directory, userChatMessage);
+        chatDirectories.set(agentInfo.id, agentInfo.directory);
+
+        const sendResult = chatSession.sendMessage(agentInfo, userMessage);
+        if (sendResult.ok === false)
+        {
+            return sendResult;
+        }
+
+        const previousSessionId = agentInfo.chatSessionId;
+        const isNewSession = previousSessionId !== sendResult.chatSessionId;
+        if (isNewSession === true)
+        {
+            await agentStore.setChatSessionId(agentInfo.directory, sendResult.chatSessionId);
+        }
+        return sendResult;
+    });
+
+    ipcMain.handle("chat:cancel", async function (ipcEvent, agentId)
+    {
+        const cancelResult = chatSession.cancelMessage(agentId);
+        return cancelResult;
+    });
+
+    ipcMain.handle("chat:busy", async function (ipcEvent, agentId)
+    {
+        const isBusy = chatSession.isBusy(agentId);
+        return isBusy;
     });
 
     ipcMain.handle("agent:stop", async function (ipcEvent, agentId)
@@ -462,6 +523,60 @@ function broadcastToWindows(channelName, payload)
 }
 
 //=================================================================================================
+// 기본 모드 채팅 이벤트를 렌더러로 전달하고, 완료 시 응답을 대화 기록에 저장한다.
+//=================================================================================================
+function registerChatForwarders()
+{
+    // 스트리밍으로 조각조각 도착하는 응답을 모아 한 건의 메시지로 기록한다. (agentId → 텍스트)
+    const pendingReplies = new System.Map();
+
+    chatSession.setEventListener(async function (agentId, chatEvent)
+    {
+        const payload =
+        {
+            id: agentId,
+            event: chatEvent
+        };
+
+        const eventType = chatEvent.type;
+        if (eventType === "text")
+        {
+            let pendingText = pendingReplies.get(agentId);
+            if (pendingText === undefined)
+            {
+                pendingText = "";
+            }
+            pendingReplies.set(agentId, pendingText + chatEvent.text);
+            broadcastToWindows("chat:event", payload);
+            return;
+        }
+
+        if (eventType !== "closed")
+        {
+            broadcastToWindows("chat:event", payload);
+            return;
+        }
+
+        // 완료 이벤트는 응답을 기록에 남긴 뒤 알린다. 렌더러가 곧바로 기록을 다시 읽기 때문이다.
+        const pendingText = pendingReplies.get(agentId);
+        pendingReplies.delete(agentId);
+        const agentDirectoryPath = chatDirectories.get(agentId);
+        const hasReply = pendingText !== undefined && pendingText.length > 0;
+        if (hasReply === true && agentDirectoryPath !== undefined)
+        {
+            const assistantMessage =
+            {
+                role: "assistant",
+                text: pendingText,
+                at: new System.Date().toISOString()
+            };
+            await chatStore.appendMessage(agentDirectoryPath, assistantMessage);
+        }
+        broadcastToWindows("chat:event", payload);
+    });
+}
+
+//=================================================================================================
 // 에이전트 pty 출력/종료 이벤트를 렌더러로 전달하도록 리스너를 등록한다.
 //=================================================================================================
 function registerAgentForwarders()
@@ -495,6 +610,7 @@ app.whenReady().then(function ()
     }
     registerIpcHandlers();
     registerAgentForwarders();
+    registerChatForwarders();
     createMainWindow();
     createTray();
 
@@ -516,6 +632,7 @@ app.on("before-quit", function ()
 {
     isQuitting = true;
     agentManager.stopAllAgents();
+    chatSession.cancelAll();
 });
 
 // 창을 모두 닫아도 트레이에 상주해야 하므로 종료하지 않는다.

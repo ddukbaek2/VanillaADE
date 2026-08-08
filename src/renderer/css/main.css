@@ -696,6 +696,119 @@ body
 }
 
 /*=================================================================================================
+  기본 모드 대화 화면 (채팅)
+=================================================================================================*/
+.agent-chat-root
+{
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.chat-list
+{
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 20px 24px;
+}
+
+.chat-empty-message
+{
+    margin: auto;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+.chat-row
+{
+    display: flex;
+}
+
+.chat-row.user
+{
+    justify-content: flex-end;
+}
+
+.chat-row.assistant
+{
+    justify-content: flex-start;
+}
+
+.chat-bubble
+{
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+}
+
+.chat-row.user .chat-bubble
+{
+    background-color: var(--color-accent);
+    color: var(--color-on-accent);
+    border-top-right-radius: 4px;
+}
+
+.chat-row.assistant .chat-bubble
+{
+    background-color: var(--color-panel);
+    border: 1px solid var(--color-border);
+    color: var(--color-text);
+    border-top-left-radius: 4px;
+}
+
+.chat-activity
+{
+    align-self: flex-start;
+    font-size: 12px;
+    color: var(--color-text-muted);
+    padding: 4px 2px;
+}
+
+.chat-composer
+{
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 12px 24px 16px 24px;
+    border-top: 1px solid var(--color-border);
+}
+
+.chat-input
+{
+    flex: 1 1 auto;
+    min-height: 44px;
+    max-height: 160px;
+    resize: none;
+    background-color: var(--color-background);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 13px;
+    font-family: var(--font-ui);
+    line-height: 1.5;
+    user-select: text;
+}
+
+.chat-input:focus
+{
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+/*=================================================================================================
   상태 배지 (실행 상태 표시)
 =================================================================================================*/
 .status-badge
@@ -792,6 +905,7 @@ body
 }
 
 .text-input,
+.text-area,
 .select-input
 {
     background-color: var(--color-background);
@@ -803,13 +917,22 @@ body
     font-family: var(--font-ui);
 }
 
-.text-input
+.text-input,
+.text-area
 {
     width: 100%;
     user-select: text;
 }
 
+.text-area
+{
+    min-height: 64px;
+    resize: vertical;
+    line-height: 1.5;
+}
+
 .text-input:focus,
+.text-area:focus,
 .select-input:focus
 {
     outline: none;

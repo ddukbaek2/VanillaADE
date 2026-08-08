@@ -65,18 +65,18 @@ const vanillaApi =
     //=========================================================================================
     // 지정 폴더에 새 에이전트를 등록한다.
     //=========================================================================================
-    addAgent: function (agentDirectoryPath, agentName, agentKind)
+    addAgent: function (agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
     {
-        const resultPromise = ipcRenderer.invoke("agent:add", agentDirectoryPath, agentName, agentKind);
+        const resultPromise = ipcRenderer.invoke("agent:add", agentDirectoryPath, agentName, agentKind, agentMode, projectSettings);
         return resultPromise;
     },
 
     //=========================================================================================
-    // 등록된 에이전트의 이름 / 종류를 갱신한다.
+    // 등록된 에이전트의 이름 / 종류 / 모드 / 프로젝트 설정을 갱신한다.
     //=========================================================================================
-    updateAgent: function (agentDirectoryPath, agentName, agentKind)
+    updateAgent: function (agentDirectoryPath, agentName, agentKind, agentMode, projectSettings)
     {
-        const resultPromise = ipcRenderer.invoke("agent:update", agentDirectoryPath, agentName, agentKind);
+        const resultPromise = ipcRenderer.invoke("agent:update", agentDirectoryPath, agentName, agentKind, agentMode, projectSettings);
         return resultPromise;
     },
 
@@ -108,12 +108,74 @@ const vanillaApi =
     },
 
     //=========================================================================================
-    // 에이전트 세션을 시작한다.
+    // 에이전트 세션을 시작한다. (라우 모드: 시작 시 프로젝트 설정을 주입)
     //=========================================================================================
-    startAgent: function (agentId, agentDirectoryPath, agentKind)
+    startAgent: function (agentId, agentDirectoryPath, agentKind, agentInfo)
     {
-        const resultPromise = ipcRenderer.invoke("agent:start", agentId, agentDirectoryPath, agentKind);
+        const resultPromise = ipcRenderer.invoke("agent:start", agentId, agentDirectoryPath, agentKind, agentInfo);
         return resultPromise;
+    },
+
+    //=========================================================================================
+    // 기본 모드 대화 기록을 읽는다.
+    //=========================================================================================
+    listChatMessages: function (agentDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("chat:list", agentDirectoryPath);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 기본 모드 대화 기록과 대화 세션을 비운다.
+    //=========================================================================================
+    clearChatMessages: function (agentDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("chat:clear", agentDirectoryPath);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 기본 모드로 메시지를 보낸다. (프로젝트 설정은 요청마다 주입된다)
+    //=========================================================================================
+    sendChatMessage: function (agentInfo, userMessage)
+    {
+        const resultPromise = ipcRenderer.invoke("chat:send", agentInfo, userMessage);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 진행 중인 기본 모드 응답을 중단한다.
+    //=========================================================================================
+    cancelChatMessage: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("chat:cancel", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 해당 에이전트가 응답을 처리 중인지 확인한다.
+    //=========================================================================================
+    isChatBusy: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("chat:busy", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 기본 모드 채팅 이벤트를 구독한다. 해제 함수를 반환한다.
+    //=========================================================================================
+    onChatEvent: function (callback)
+    {
+        const listener = function (ipcEvent, payload)
+        {
+            callback(payload);
+        };
+        ipcRenderer.on("chat:event", listener);
+        const unsubscribe = function ()
+        {
+            ipcRenderer.removeListener("chat:event", listener);
+        };
+        return unsubscribe;
     },
 
     //=========================================================================================

@@ -20,6 +20,21 @@ export const AGENT_KINDS =
 ];
 
 //=================================================================================================
+// 세션 동작 모드. 기본 모드는 채팅으로 요청하고, 라우 모드는 터미널을 그대로 사용한다.
+//=================================================================================================
+export const AGENT_MODES =
+[
+    {
+        id: "basic",
+        labelKey: "agent.modeBasic"
+    },
+    {
+        id: "raw",
+        labelKey: "agent.modeRaw"
+    }
+];
+
+//=================================================================================================
 // 에이전트 종류 아이디에 해당하는 표시 이름을 반환한다. (모르는 종류면 아이디 그대로)
 //=================================================================================================
 export function getAgentKindLabel(agentKind)
@@ -76,16 +91,28 @@ export function openAgentDialog(dialogOptions)
     let selectedDirectory = "";
     let initialName = "";
     let initialKind = AGENT_KINDS[0].id;
+    let initialMode = AGENT_MODES[0].id;
     let initialGoogleApiKey = "";
+    let initialDescription = "";
+    let initialTechStack = "";
+    let initialGuidelines = "";
     if (targetAgent !== null && targetAgent !== undefined)
     {
         selectedDirectory = targetAgent.directory;
         initialName = targetAgent.name;
         initialKind = targetAgent.kind;
+        initialMode = targetAgent.mode;
         const targetGoogleApiKey = targetAgent.googleApiKey;
         if (targetGoogleApiKey !== undefined && targetGoogleApiKey !== null)
         {
             initialGoogleApiKey = targetGoogleApiKey;
+        }
+        const targetProjectSettings = targetAgent.projectSettings;
+        if (targetProjectSettings !== undefined && targetProjectSettings !== null)
+        {
+            initialDescription = targetProjectSettings.description;
+            initialTechStack = targetProjectSettings.techStack;
+            initialGuidelines = targetProjectSettings.guidelines;
         }
     }
 
@@ -158,6 +185,25 @@ export function openAgentDialog(dialogOptions)
     }
     const kindFieldElement = createFormField(t("agent.kind"), kindSelectElement);
     bodyElement.appendChild(kindFieldElement);
+
+    // 동작 모드 (기본 = 채팅, 라우 = 터미널)
+    const modeSelectElement = document.createElement("select");
+    modeSelectElement.className = "select-input";
+    for (const modeDefinition of AGENT_MODES)
+    {
+        const optionElement = document.createElement("option");
+        optionElement.value = modeDefinition.id;
+        const modeLabelKey = modeDefinition.labelKey;
+        optionElement.textContent = t(modeLabelKey);
+        if (modeDefinition.id === initialMode)
+        {
+            optionElement.selected = true;
+        }
+        modeSelectElement.appendChild(optionElement);
+    }
+    const modeHint = t("agent.modeHint");
+    const modeFieldElement = createFormField(t("agent.mode"), modeSelectElement, modeHint);
+    bodyElement.appendChild(modeFieldElement);
 
     // 프로젝트 디렉토리 (추가 모드에서만 변경 가능)
     const directoryRowElement = document.createElement("div");
@@ -272,6 +318,29 @@ export function openAgentDialog(dialogOptions)
         });
     }
 
+    // 프로젝트 설정. 요청에 붙일 맥락으로 사용된다.
+    const descriptionInputElement = document.createElement("textarea");
+    descriptionInputElement.className = "text-area";
+    descriptionInputElement.placeholder = t("agent.descriptionPlaceholder");
+    descriptionInputElement.value = initialDescription;
+    const descriptionHint = t("agent.projectSettingsHint");
+    const descriptionFieldElement = createFormField(t("agent.description"), descriptionInputElement, descriptionHint);
+    bodyElement.appendChild(descriptionFieldElement);
+
+    const techStackInputElement = document.createElement("textarea");
+    techStackInputElement.className = "text-area";
+    techStackInputElement.placeholder = t("agent.techStackPlaceholder");
+    techStackInputElement.value = initialTechStack;
+    const techStackFieldElement = createFormField(t("agent.techStack"), techStackInputElement);
+    bodyElement.appendChild(techStackFieldElement);
+
+    const guidelinesInputElement = document.createElement("textarea");
+    guidelinesInputElement.className = "text-area";
+    guidelinesInputElement.placeholder = t("agent.guidelinesPlaceholder");
+    guidelinesInputElement.value = initialGuidelines;
+    const guidelinesFieldElement = createFormField(t("agent.guidelines"), guidelinesInputElement);
+    bodyElement.appendChild(guidelinesFieldElement);
+
     // 구글 API 키 (프로젝트 디렉토리의 .env 에 저장된다)
     const googleApiKeyInputElement = document.createElement("input");
     googleApiKeyInputElement.className = "text-input";
@@ -345,6 +414,12 @@ export function openAgentDialog(dialogOptions)
             }
         }
 
+        const projectSettings =
+        {
+            description: descriptionInputElement.value.trim(),
+            techStack: techStackInputElement.value.trim(),
+            guidelines: guidelinesInputElement.value.trim()
+        };
         const formValues =
         {
             sourceMode: sourceMode,
@@ -353,6 +428,8 @@ export function openAgentDialog(dialogOptions)
             parentDirectory: selectedParentDirectory,
             name: nameInputElement.value.trim(),
             kind: kindSelectElement.value,
+            mode: modeSelectElement.value,
+            projectSettings: projectSettings,
             googleApiKey: googleApiKeyInputElement.value.trim()
         };
 
