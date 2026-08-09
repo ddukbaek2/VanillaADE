@@ -8,6 +8,8 @@ import { createMenubar } from "./menubar.js";
 import { createAgentPanel } from "./agentPanel.js";
 import { renderStatusBar } from "./statusBar.js";
 import { openAgentDialog } from "./agentDialog.js";
+import { openGameDialog } from "./gameDialog.js";
+import { openActionLogDialog, appendActionLog, finishActionLog } from "./actionLogDialog.js";
 import { openContextMenu, openContextMenuAt } from "./contextMenu.js";
 import { agentTerminalView } from "./views/agentTerminal.js";
 import { agentChatView, updateChatView } from "./views/agentChat.js";
@@ -86,6 +88,11 @@ async function reloadAgents()
     const isDetachedWindow = applicationState.isDetachedWindow;
     for (const agent of agentList)
     {
+        // 게임 설정 파일이 있으면 vanilla.js 엔진 기반 게임 프로젝트로 다룬다.
+        const configData = await vanilla.readGameConfig(agent.directory);
+        agent.isGameProject = configData.exists;
+        agent.gameConfig = configData;
+
         const detachedIndex = detachedAgentIds.indexOf(agent.id);
         // 분리 창 자신은 그 에이전트를 직접 표시하므로 분리 상태로 취급하지 않는다.
         if (isDetachedWindow === true)
@@ -149,7 +156,9 @@ function renderContent()
             activityLabel: chatState.activityLabel,
             onSendMessage: sendChatMessage,
             onCancelMessage: cancelChatMessage,
-            onClearMessages: clearChatMessages
+            onClearMessages: clearChatMessages,
+            onRunAction: runProjectAction,
+            onOpenGameSettings: openGameSettings
         };
         agentChatView.render(contentElement, chatContext);
         return;
@@ -160,7 +169,9 @@ function renderContent()
         agent: selectedAgent,
         onStartAgent: startAgentSession,
         onStopAgent: stopAgentSession,
-        onAttachAgent: attachAgent
+        onAttachAgent: attachAgent,
+        onRunAction: runProjectAction,
+        onOpenGameSettings: openGameSettings
     };
     agentTerminalView.render(contentElement, viewContext);
 }
@@ -431,6 +442,106 @@ function handleChatEvent(payload)
 }
 
 //=================================================================================================
+// 게임 설정 팝업을 연다. 저장하면 game.config.js 에 반영되고 엔진 버전도 함께 맞춘다.
+//=================================================================================================
+async function openGameSettings(agent)
+{
+    const currentConfig = await vanilla.readGameConfig(agent.directory);
+    const markets = await vanilla.listMarkets();
+
+    let engineVersions = [];
+    const versionResult = await vanilla.listEngineVersions();
+    if (versionResult.ok === true)
+    {
+        engineVersions = versionResult.versions;
+    }
+
+    const dialogOptions =
+    {
+        gameConfig: currentConfig,
+        markets: markets,
+        engineVersions: engineVersions,
+        onSubmit: async function (nextConfig)
+        {
+            await vanilla.writeGameConfig(agent.directory, nextConfig);
+
+            const isVersionChanged = currentConfig.engineVersion !== nextConfig.engineVersion;
+            if (isVersionChanged === true)
+            {
+                const applyResult = await vanilla.applyEngineVersion(agent.directory, nextConfig.engineVersion);
+                if (applyResult.ok === false)
+                {
+                    const failedResult =
+                    {
+                        ok: false,
+                        message: t("game.engineApplyFailed", [applyResult.message])
+                    };
+                    return failedResult;
+                }
+            }
+
+            await reloadAgents();
+            renderAll();
+            showToast(t("game.saved"));
+
+            const successResult =
+            {
+                ok: true
+            };
+            return successResult;
+        }
+    };
+    openGameDialog(dialogOptions);
+}
+
+//=================================================================================================
+// 고정 액션(웹 빌드 · 자산 점검 · 의존성 설치)을 실행하고 로그 팝업을 띄운다.
+//=================================================================================================
+async function runProjectAction(agent, actionId)
+{
+    const actionLabelKey = "action." + actionId;
+    const dialogOptions =
+    {
+        actionLabel: t(actionLabelKey),
+        onCancel: function ()
+        {
+            vanilla.cancelAction(agent.id);
+        }
+    };
+    openActionLogDialog(dialogOptions);
+
+    const runResult = await vanilla.runAction(agent.id, agent.directory, actionId);
+    if (runResult.ok === false)
+    {
+        finishActionLog(false, t("action.startFailed"));
+    }
+}
+
+//=================================================================================================
+// 고정 액션의 출력 / 종료 이벤트를 로그 팝업에 반영한다.
+//=================================================================================================
+function handleActionEvent(payload)
+{
+    const actionEvent = payload.event;
+    const eventType = actionEvent.type;
+    if (eventType === "output")
+    {
+        appendActionLog(actionEvent.text);
+        return;
+    }
+    if (eventType === "finished")
+    {
+        const isSuccess = actionEvent.ok;
+        let statusMessage = t("action.failed", [actionEvent.exitCode]);
+        if (actionEvent.message !== undefined)
+        {
+            statusMessage = t("action.failed", [actionEvent.message]);
+        }
+        finishActionLog(isSuccess, statusMessage);
+    }
+}
+
+//=================================================================================================
 // 에이전트를 별도 창으로 분리한다.
 //=================================================================================================
 async function detachAgent(agentId)
@@ -543,7 +654,37 @@ function getCloneFailureMessage(cloneResult)
 }
 
 //=================================================================================================
-// 에이전트 추가 팝업을 연다. (새로 만들기·열기 또는 저장소 클론)
+// 게임 프로젝트 준비 실패 사유를 사용자에게 보여줄 메시지로 바꾼다.
+//=================================================================================================
+function getSetupFailureMessage(setupResult)
+{
+    const failureReason = setupResult.reason;
+    if (failureReason === "exists")
+    {
+        const existsMessage = t("agent.cloneExists", [setupResult.directory]);
+        return existsMessage;
+    }
+    if (failureReason === "git-missing")
+    {
+        const gitMissingMessage = t("agent.gitMissing");
+        return gitMissingMessage;
+    }
+    if (failureReason === "npm-missing")
+    {
+        const npmMissingMessage = t("agent.npmMissing");
+        return npmMissingMessage;
+    }
+    if (failureReason === "install-failed")
+    {
+        const installFailedMessage = t("agent.installFailed", [setupResult.message]);
+        return installFailedMessage;
+    }
+    const failedMessage = t("agent.cloneFailed", [setupResult.message]);
+    return failedMessage;
+}
+
+//=================================================================================================
+// 에이전트 추가 팝업을 연다. (새로 만들기·열기 / 저장소 클론 / 새 게임 프로젝트)
 //=================================================================================================
 function openAddAgentDialog()
 {
@@ -554,6 +695,30 @@ function openAddAgentDialog()
         onSubmit: async function (formValues)
         {
             let agentDirectory = formValues.directory;
+            const isGame = formValues.sourceMode === "game";
+            if (isGame === true)
+            {
+                const setupResult = await vanilla.setupGameProject(formValues.parentDirectory, formValues.gameProjectName);
+                if (setupResult.ok === false)
+                {
+                    const setupFailedResult =
+                    {
+                        ok: false,
+                        message: getSetupFailureMessage(setupResult)
+                    };
+                    return setupFailedResult;
+                }
+                agentDirectory = setupResult.directory;
+
+                // 새로 만든 게임 프로젝트의 설정 파일을 만들고 진입 스크립트와 연결한다.
+                const initialConfig =
+                {
+                    gameName: formValues.gameProjectName,
+                    markets: ["web-deploy"]
+                };
+                await vanilla.writeGameConfig(agentDirectory, initialConfig);
+            }
+
             const isClone = formValues.sourceMode === "clone";
             if (isClone === true)
             {
@@ -783,6 +948,20 @@ function openAgentMenu(agent, anchorElement, clientX, clientY)
             }
         };
         menuItems.push(detachItem);
+    }
+
+    const isGameProject = agent.isGameProject;
+    if (isGameProject === true)
+    {
+        const gameSettingsItem =
+        {
+            label: t("game.title"),
+            action: function ()
+            {
+                openGameSettings(agent);
+            }
+        };
+        menuItems.push(gameSettingsItem);
     }
 
     const settingsItem =
@@ -1025,6 +1204,7 @@ async function initializeApplication()
     initializeTerminalStore();
     vanilla.onAgentExit(handleAgentExit);
     vanilla.onChatEvent(handleChatEvent);
+    vanilla.onActionEvent(handleActionEvent);
     vanilla.onDetachedChanged(handleDetachedChanged);
 
     const platform = vanilla.platform;

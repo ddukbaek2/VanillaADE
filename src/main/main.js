@@ -13,6 +13,10 @@ const gitClone = require("./gitClone");
 const chatSession = require("./chatSession");
 const chatStore = require("./chatStore");
 const projectPrompt = require("./projectPrompt");
+const gameConfig = require("./gameConfig");
+const engineVersion = require("./engineVersion");
+const buildRunner = require("./buildRunner");
+const projectSetup = require("./projectSetup");
 
 const GOOGLE_API_KEY_NAME = "GOOGLE_API_KEY";
 
@@ -258,6 +262,19 @@ function createTray()
 }
 
 //=================================================================================================
+// 게임 프로젝트면 현재 게임 설정을 에이전트 정보에 붙인다. (프롬프트 주입용)
+//=================================================================================================
+async function attachGameConfig(agentInfo)
+{
+    const configData = await gameConfig.readConfig(agentInfo.directory);
+    if (configData.exists === false)
+    {
+        return;
+    }
+    agentInfo.gameConfig = configData;
+}
+
+//=================================================================================================
 // IPC 핸들러들을 등록한다.
 //=================================================================================================
 function registerIpcHandlers()
@@ -281,8 +298,68 @@ function registerIpcHandlers()
 
     ipcMain.handle("git:clone", async function (ipcEvent, repositoryUrl, parentDirectoryPath)
     {
-        const cloneResult = await gitClone.cloneRepository(repositoryUrl, parentDirectoryPath);
+        const cloneResult = await gitClone.cloneRepository(repositoryUrl, parentDirectoryPath, "", false);
         return cloneResult;
+    });
+
+    ipcMain.handle("game:setup", async function (ipcEvent, parentDirectoryPath, projectName)
+    {
+        const setupResult = await projectSetup.setupGameProject(parentDirectoryPath, projectName);
+        return setupResult;
+    });
+
+    ipcMain.handle("game:read-config", async function (ipcEvent, projectDirectoryPath)
+    {
+        const configData = await gameConfig.readConfig(projectDirectoryPath);
+        return configData;
+    });
+
+    ipcMain.handle("game:write-config", async function (ipcEvent, projectDirectoryPath, configData)
+    {
+        const savedConfig = await gameConfig.writeConfig(projectDirectoryPath, configData);
+        await gameConfig.connectMainScript(projectDirectoryPath);
+        return savedConfig;
+    });
+
+    ipcMain.handle("game:market-list", async function ()
+    {
+        return gameConfig.MARKETS;
+    });
+
+    ipcMain.handle("engine:list-versions", async function ()
+    {
+        const versionResult = await engineVersion.listVersions();
+        return versionResult;
+    });
+
+    ipcMain.handle("engine:apply-version", async function (ipcEvent, projectDirectoryPath, versionName)
+    {
+        const applyResult = await engineVersion.applyVersion(projectDirectoryPath, versionName);
+        return applyResult;
+    });
+
+    ipcMain.handle("engine:current-version", async function (ipcEvent, projectDirectoryPath)
+    {
+        const currentVersion = await engineVersion.getCurrentVersion(projectDirectoryPath);
+        return currentVersion;
+    });
+
+    ipcMain.handle("action:run", async function (ipcEvent, agentId, projectDirectoryPath, actionId)
+    {
+        const runResult = buildRunner.runAction(agentId, projectDirectoryPath, actionId);
+        return runResult;
+    });
+
+    ipcMain.handle("action:cancel", async function (ipcEvent, agentId)
+    {
+        const cancelResult = buildRunner.cancelAction(agentId);
+        return cancelResult;
+    });
+
+    ipcMain.handle("action:running", async function (ipcEvent, agentId)
+    {
+        const isRunning = buildRunner.isRunning(agentId);
+        return isRunning;
     });
 
     ipcMain.handle("agent:list", async function ()
@@ -349,6 +426,7 @@ function registerIpcHandlers()
     ipcMain.handle("agent:start", async function (ipcEvent, agentId, agentDirectoryPath, agentKind, agentInfo)
     {
         // 라우 모드는 세션을 띄울 때 프로젝트 설정을 한 번 주입한다.
+        await attachGameConfig(agentInfo);
         const systemPrompt = projectPrompt.buildSystemPrompt(agentInfo);
         const startResult = agentManager.startAgent(agentId, agentDirectoryPath, agentKind, systemPrompt);
         return startResult;
@@ -378,6 +456,7 @@ function registerIpcHandlers()
         await chatStore.appendMessage(agentInfo.directory, userChatMessage);
         chatDirectories.set(agentInfo.id, agentInfo.directory);
 
+        await attachGameConfig(agentInfo);
         const sendResult = chatSession.sendMessage(agentInfo, userMessage);
         if (sendResult.ok === false)
         {
@@ -577,6 +656,31 @@ function registerChatForwarders()
 }
 
 //=================================================================================================
+// 고정 액션(빌드 · 점검)의 출력과 프로젝트 셋업 진행 상황을 렌더러로 전달한다.
+//=================================================================================================
+function registerActionForwarders()
+{
+    buildRunner.setOutputListener(function (agentId, actionEvent)
+    {
+        const payload =
+        {
+            id: agentId,
+            event: actionEvent
+        };
+        broadcastToWindows("action:event", payload);
+    });
+
+    projectSetup.setProgressListener(function (stepName)
+    {
+        const payload =
+        {
+            step: stepName
+        };
+        broadcastToWindows("game:setup-progress", payload);
+    });
+}
+
+//=================================================================================================
 // 에이전트 pty 출력/종료 이벤트를 렌더러로 전달하도록 리스너를 등록한다.
 //=================================================================================================
 function registerAgentForwarders()
@@ -611,6 +715,7 @@ app.whenReady().then(function ()
     registerIpcHandlers();
     registerAgentForwarders();
     registerChatForwarders();
+    registerActionForwarders();
     createMainWindow();
     createTray();
 
@@ -633,6 +738,7 @@ app.on("before-quit", function ()
     isQuitting = true;
     agentManager.stopAllAgents();
     chatSession.cancelAll();
+    buildRunner.cancelAll();
 });
 
 // 창을 모두 닫아도 트레이에 상주해야 하므로 종료하지 않는다.

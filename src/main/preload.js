@@ -54,6 +54,130 @@ const vanillaApi =
     },
 
     //=========================================================================================
+    // vanilla.js 엔진 기반 게임 프로젝트를 새로 준비한다. (템플릿 · 엔진 · 의존성)
+    //=========================================================================================
+    setupGameProject: function (parentDirectoryPath, projectName)
+    {
+        const resultPromise = ipcRenderer.invoke("game:setup", parentDirectoryPath, projectName);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 게임 설정(game.config.js)을 읽는다.
+    //=========================================================================================
+    readGameConfig: function (projectDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("game:read-config", projectDirectoryPath);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 게임 설정을 기록한다. 진입 스크립트가 설정을 쓰도록 연결도 함께 확인한다.
+    //=========================================================================================
+    writeGameConfig: function (projectDirectoryPath, configData)
+    {
+        const resultPromise = ipcRenderer.invoke("game:write-config", projectDirectoryPath, configData);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 배포 대상(마켓) 목록을 반환한다.
+    //=========================================================================================
+    listMarkets: function ()
+    {
+        const resultPromise = ipcRenderer.invoke("game:market-list");
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 프로젝트 준비 진행 상황을 구독한다. 해제 함수를 반환한다.
+    //=========================================================================================
+    onSetupProgress: function (callback)
+    {
+        const listener = function (ipcEvent, payload)
+        {
+            callback(payload);
+        };
+        ipcRenderer.on("game:setup-progress", listener);
+        const unsubscribe = function ()
+        {
+            ipcRenderer.removeListener("game:setup-progress", listener);
+        };
+        return unsubscribe;
+    },
+
+    //=========================================================================================
+    // 사용할 수 있는 엔진 버전 목록을 반환한다.
+    //=========================================================================================
+    listEngineVersions: function ()
+    {
+        const resultPromise = ipcRenderer.invoke("engine:list-versions");
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 프로젝트의 엔진을 지정한 버전으로 맞춘다.
+    //=========================================================================================
+    applyEngineVersion: function (projectDirectoryPath, versionName)
+    {
+        const resultPromise = ipcRenderer.invoke("engine:apply-version", projectDirectoryPath, versionName);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 프로젝트가 현재 쓰는 엔진 버전을 반환한다.
+    //=========================================================================================
+    getCurrentEngineVersion: function (projectDirectoryPath)
+    {
+        const resultPromise = ipcRenderer.invoke("engine:current-version", projectDirectoryPath);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 고정 액션(웹 빌드 · 자산 점검 · 의존성 설치)을 실행한다.
+    //=========================================================================================
+    runAction: function (agentId, projectDirectoryPath, actionId)
+    {
+        const resultPromise = ipcRenderer.invoke("action:run", agentId, projectDirectoryPath, actionId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 실행 중인 액션을 중단한다.
+    //=========================================================================================
+    cancelAction: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("action:cancel", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 해당 에이전트에서 액션이 실행 중인지 확인한다.
+    //=========================================================================================
+    isActionRunning: function (agentId)
+    {
+        const resultPromise = ipcRenderer.invoke("action:running", agentId);
+        return resultPromise;
+    },
+
+    //=========================================================================================
+    // 액션 출력 / 종료 이벤트를 구독한다. 해제 함수를 반환한다.
+    //=========================================================================================
+    onActionEvent: function (callback)
+    {
+        const listener = function (ipcEvent, payload)
+        {
+            callback(payload);
+        };
+        ipcRenderer.on("action:event", listener);
+        const unsubscribe = function ()
+        {
+            ipcRenderer.removeListener("action:event", listener);
+        };
+        return unsubscribe;
+    },
+
+    //=========================================================================================
     // 등록된 에이전트 목록을 반환한다. (각 항목에 실행 여부 running 포함)
     //=========================================================================================
     listAgents: function ()

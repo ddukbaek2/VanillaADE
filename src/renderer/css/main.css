@@ -1073,6 +1073,81 @@ body
     line-height: 1.5;
 }
 
+.form-field-separator
+{
+    flex: 0 0 auto;
+    color: var(--color-text-muted);
+}
+
+/* 배포 대상 체크 목록 */
+.market-list
+{
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 16px;
+}
+
+.market-item
+{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.market-item input[disabled]
+{
+    cursor: default;
+}
+
+.market-item input[disabled] + span
+{
+    color: var(--color-text-muted);
+}
+
+/* 고정 액션 실행 로그 */
+.action-log-status
+{
+    margin: 0;
+    font-size: 12px;
+}
+
+.action-log-status.working
+{
+    color: var(--color-text-muted);
+}
+
+.action-log-status.success
+{
+    color: var(--color-success);
+}
+
+.action-log-status.failure
+{
+    color: var(--color-danger);
+}
+
+.action-log-output
+{
+    flex: 1 1 auto;
+    min-height: 220px;
+    max-height: 50vh;
+    overflow: auto;
+    margin: 0;
+    padding: 12px 14px;
+    background-color: var(--color-terminal-background);
+    color: var(--color-terminal-foreground);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: text;
+}
+
 /*=================================================================================================
   컨텍스트 메뉴
 =================================================================================================*/

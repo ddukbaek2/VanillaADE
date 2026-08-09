@@ -141,6 +141,7 @@ export function openAgentDialog(dialogOptions)
     let sourceMode = "open";
     let openTabButtonElement = null;
     let cloneTabButtonElement = null;
+    let gameTabButtonElement = null;
     if (dialogMode !== "edit")
     {
         const tabsElement = document.createElement("div");
@@ -155,6 +156,11 @@ export function openAgentDialog(dialogOptions)
         cloneTabButtonElement.className = "modal-tab";
         cloneTabButtonElement.textContent = t("agent.tabClone");
         tabsElement.appendChild(cloneTabButtonElement);
+
+        gameTabButtonElement = document.createElement("button");
+        gameTabButtonElement.className = "modal-tab";
+        gameTabButtonElement.textContent = t("agent.tabGame");
+        tabsElement.appendChild(gameTabButtonElement);
 
         dialogElement.appendChild(tabsElement);
     }
@@ -280,6 +286,16 @@ export function openAgentDialog(dialogOptions)
     parentDirectoryFieldElement.style.display = "none";
     bodyElement.appendChild(parentDirectoryFieldElement);
 
+    // 새 게임 프로젝트 이름 (Game 탭에서만 사용)
+    const gameProjectNameInputElement = document.createElement("input");
+    gameProjectNameInputElement.className = "text-input";
+    gameProjectNameInputElement.type = "text";
+    gameProjectNameInputElement.placeholder = t("agent.gameProjectNamePlaceholder");
+    const gameProjectHint = t("agent.gameProjectHint");
+    const gameProjectNameFieldElement = createFormField(t("agent.gameProjectName"), gameProjectNameInputElement, gameProjectHint);
+    gameProjectNameFieldElement.style.display = "none";
+    bodyElement.appendChild(gameProjectNameFieldElement);
+
     //=========================================================================================
     // 선택한 탭에 맞춰 소스 입력 필드를 전환한다.
     //=========================================================================================
@@ -287,23 +303,34 @@ export function openAgentDialog(dialogOptions)
     {
         sourceMode = nextSourceMode;
         const isClone = nextSourceMode === "clone";
+        const isGame = nextSourceMode === "game";
+
+        directoryFieldElement.style.display = "none";
+        repositoryUrlFieldElement.style.display = "none";
+        parentDirectoryFieldElement.style.display = "none";
+        gameProjectNameFieldElement.style.display = "none";
+        openTabButtonElement.classList.remove("active");
+        cloneTabButtonElement.classList.remove("active");
+        gameTabButtonElement.classList.remove("active");
+
         if (isClone === true)
         {
-            directoryFieldElement.style.display = "none";
             repositoryUrlFieldElement.style.display = "";
             parentDirectoryFieldElement.style.display = "";
-            openTabButtonElement.classList.remove("active");
             cloneTabButtonElement.classList.add("active");
             repositoryUrlInputElement.focus();
+            return;
         }
-        else
+        if (isGame === true)
         {
-            directoryFieldElement.style.display = "";
-            repositoryUrlFieldElement.style.display = "none";
-            parentDirectoryFieldElement.style.display = "none";
-            cloneTabButtonElement.classList.remove("active");
-            openTabButtonElement.classList.add("active");
+            gameProjectNameFieldElement.style.display = "";
+            parentDirectoryFieldElement.style.display = "";
+            gameTabButtonElement.classList.add("active");
+            gameProjectNameInputElement.focus();
+            return;
         }
+        directoryFieldElement.style.display = "";
+        openTabButtonElement.classList.add("active");
     }
 
     if (dialogMode !== "edit")
@@ -315,6 +342,10 @@ export function openAgentDialog(dialogOptions)
         cloneTabButtonElement.addEventListener("click", function (cloneTabClickEvent)
         {
             selectSourceMode("clone");
+        });
+        gameTabButtonElement.addEventListener("click", function (gameTabClickEvent)
+        {
+            selectSourceMode("game");
         });
     }
 
@@ -391,12 +422,27 @@ export function openAgentDialog(dialogOptions)
     confirmButtonElement.addEventListener("click", async function (confirmClickEvent)
     {
         const repositoryUrl = repositoryUrlInputElement.value.trim();
+        const gameProjectName = gameProjectNameInputElement.value.trim();
         const isClone = sourceMode === "clone";
+        const isGame = sourceMode === "game";
         if (isClone === true)
         {
             if (repositoryUrl.length === 0)
             {
                 errorElement.textContent = t("agent.repositoryUrlRequired");
+                return;
+            }
+            if (selectedParentDirectory.length === 0)
+            {
+                errorElement.textContent = t("agent.cloneParentRequired");
+                return;
+            }
+        }
+        else if (isGame === true)
+        {
+            if (gameProjectName.length === 0)
+            {
+                errorElement.textContent = t("agent.gameProjectNameRequired");
                 return;
             }
             if (selectedParentDirectory.length === 0)
@@ -426,6 +472,7 @@ export function openAgentDialog(dialogOptions)
             directory: selectedDirectory,
             repositoryUrl: repositoryUrl,
             parentDirectory: selectedParentDirectory,
+            gameProjectName: gameProjectName,
             name: nameInputElement.value.trim(),
             kind: kindSelectElement.value,
             mode: modeSelectElement.value,
@@ -438,6 +485,18 @@ export function openAgentDialog(dialogOptions)
         {
             errorElement.classList.add("working");
             errorElement.textContent = t("agent.cloning");
+        }
+        else if (isGame === true)
+        {
+            errorElement.classList.add("working");
+            errorElement.textContent = t("agent.settingUp");
+            // 셋업 진행 단계를 그대로 보여준다.
+            const vanilla = window.vanilla;
+            vanilla.onSetupProgress(function (progressPayload)
+            {
+                const stepKey = "agent.setupStep." + progressPayload.step;
+                errorElement.textContent = t(stepKey);
+            });
         }
         const submitResult = await onSubmit(formValues);
         confirmButtonElement.disabled = false;

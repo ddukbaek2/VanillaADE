@@ -202,6 +202,31 @@ function createHeader(agent, viewContext)
     const actionsElement = document.createElement("div");
     actionsElement.className = "agent-terminal-actions";
 
+    // 게임 프로젝트는 ADE 가 정해둔 고정 액션을 버튼으로 바로 실행할 수 있다.
+    const isGameProject = agent.isGameProject;
+    if (isGameProject === true)
+    {
+        const buildButtonElement = document.createElement("button");
+        buildButtonElement.className = "secondary-button";
+        buildButtonElement.textContent = t("action.web-build");
+        const onRunAction = viewContext.onRunAction;
+        buildButtonElement.addEventListener("click", function (buildClickEvent)
+        {
+            onRunAction(agent, "web-build");
+        });
+        actionsElement.appendChild(buildButtonElement);
+
+        const gameSettingsButtonElement = document.createElement("button");
+        gameSettingsButtonElement.className = "secondary-button";
+        gameSettingsButtonElement.textContent = t("game.title");
+        const onOpenGameSettings = viewContext.onOpenGameSettings;
+        gameSettingsButtonElement.addEventListener("click", function (gameSettingsClickEvent)
+        {
+            onOpenGameSettings(agent);
+        });
+        actionsElement.appendChild(gameSettingsButtonElement);
+    }
+
     const clearButtonElement = document.createElement("button");
     clearButtonElement.className = "secondary-button";
     clearButtonElement.textContent = t("chat.clear");
